@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:billreciptapp/addproductscreen.dart';
 import 'package:billreciptapp/databasehelper.dart';
@@ -6,11 +7,14 @@ import 'package:billreciptapp/usermodel.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
-import 'package:pdf/pdf.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:pdf/pdf.dart' hide PdfDocument, PdfFont, PdfColor;
 import 'package:printing/printing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:pdf/widgets.dart' as pw;
+import 'package:syncfusion_flutter_pdf/pdf.dart';
 
 class ReceiptScreen extends StatefulWidget {
   @override
@@ -26,7 +30,6 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
   List<CartItem> cartItems = [];
   List<Product> allProducts = [];
   List<Product> filteredProducts = [];
-
   // Language support
   bool isTamil = true;
   Map<String, Map<String, String>> translations = {
@@ -254,7 +257,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     try {
       final prefs = await SharedPreferences.getInstance();
       setState(() {
-        receiptNumber = prefs.getInt('receiptNumber') ?? 3386;
+        receiptNumber = prefs.getInt('receiptNumber') ?? 1;
       });
       print('Receipt number loaded: $receiptNumber');
     } catch (e) {
@@ -642,7 +645,19 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
 
   double get totalAmount => cartItems.fold(0, (sum, item) => sum + item.total);
 
-  Future<void> _generatePDF() async {
+  Future<void> _saveReceiptInMobile() async {
+    final pdf = pw.Document();
+
+    int counter = 1;
+    final output = await getTemporaryDirectory();
+    final file = File("${output.path}/bill${counter + 1}.pdf");
+    print("the file name is $file");
+
+    await file.writeAsBytes(await pdf.save());
+    print("ends");
+  }
+
+  Future<void> _generatePDFWithTable() async {
     try {
       final pdf = pw.Document();
 
@@ -666,6 +681,497 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                   'சேர்மன் சாமி துணை',
                   style: pw.TextStyle(font: tamilFont, fontSize: 10),
                 ),
+                pw.Text(
+                  'மதிப்பீட்டு ரசீது',
+                  style: pw.TextStyle(font: tamilFontBold, fontSize: 12),
+                ),
+                pw.Text(
+                  shopName,
+                  style: pw.TextStyle(font: tamilFontBold, fontSize: 14),
+                ),
+                pw.Text(
+                  address,
+                  style: pw.TextStyle(font: tamilFont, fontSize: 10),
+                ),
+                pw.Text(
+                  city,
+                  style: pw.TextStyle(font: tamilFont, fontSize: 10),
+                ),
+                pw.Text(
+                  phone,
+                  style: pw.TextStyle(font: tamilFont, fontSize: 10),
+                ),
+                pw.SizedBox(height: 5),
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text(
+                      'No: $receiptNumber',
+                      style: pw.TextStyle(font: tamilFont, fontSize: 10),
+                    ),
+                    pw.Text(
+                      DateFormat(
+                        'hh:mm:ss a dd/MM/yyyy',
+                      ).format(DateTime.now()),
+                      style: pw.TextStyle(font: tamilFont, fontSize: 10),
+                    ),
+                  ],
+                ),
+                pw.Divider(),
+
+                // Table with items
+                pw.Table(
+                  columnWidths: {
+                    0: pw.FixedColumnWidth(15), // Serial number
+                    1: pw.FlexColumnWidth(3), // Product name
+                    2: pw.FixedColumnWidth(45), // Quantity
+                    3: pw.FixedColumnWidth(35), // Price
+                    4: pw.FixedColumnWidth(45), // Total
+                  },
+                  border: null,
+                  children: [
+                    // Header row
+                    pw.TableRow(
+                      children: [
+                        pw.Text(''),
+                        pw.Text(
+                          'விபரங்கள்',
+                          style: pw.TextStyle(
+                            font: tamilFontBold,
+                            fontSize: 10,
+                          ),
+                        ),
+                        pw.Text(
+                          'அளவு',
+                          style: pw.TextStyle(
+                            font: tamilFontBold,
+                            fontSize: 10,
+                          ),
+                          textAlign: pw.TextAlign.center,
+                        ),
+                        pw.Text(
+                          'விலை',
+                          style: pw.TextStyle(
+                            font: tamilFontBold,
+                            fontSize: 10,
+                          ),
+                          textAlign: pw.TextAlign.right,
+                        ),
+                        pw.Text(
+                          'தொகை',
+                          style: pw.TextStyle(
+                            font: tamilFontBold,
+                            fontSize: 10,
+                          ),
+                          textAlign: pw.TextAlign.right,
+                        ),
+                      ],
+                    ),
+                    // Divider row
+                    pw.TableRow(
+                      children: [
+                        pw.Divider(),
+                        pw.Divider(),
+                        pw.Divider(),
+                        pw.Divider(),
+                        pw.Divider(),
+                      ],
+                    ),
+                    // Item rows
+                    ...cartItems.asMap().entries.map((entry) {
+                      final index = entry.key + 1;
+                      final item = entry.value;
+
+                      return pw.TableRow(
+                        children: [
+                          pw.Text(
+                            '$index',
+                            style: pw.TextStyle(font: tamilFont, fontSize: 9),
+                          ),
+                          pw.Text(
+                            item.product.tamilName,
+                            style: pw.TextStyle(font: tamilFont, fontSize: 9),
+                          ),
+                          pw.Text(
+                            '${item.quantity}${item.product.unit}',
+                            style: pw.TextStyle(font: tamilFont, fontSize: 9),
+                            textAlign: pw.TextAlign.center,
+                          ),
+                          pw.Text(
+                            item.product.price.toStringAsFixed(2),
+                            style: pw.TextStyle(font: tamilFont, fontSize: 9),
+                            textAlign: pw.TextAlign.right,
+                          ),
+                          pw.Text(
+                            item.total.toStringAsFixed(2),
+                            style: pw.TextStyle(font: tamilFont, fontSize: 9),
+                            textAlign: pw.TextAlign.right,
+                          ),
+                        ],
+                      );
+                    }).toList(),
+                  ],
+                ),
+
+                pw.Divider(),
+
+                // Total
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.end,
+                  children: [
+                    pw.Text(
+                      'மொத்தம்   ',
+                      style: pw.TextStyle(font: tamilFontBold, fontSize: 11),
+                    ),
+                    pw.Container(
+                      width: 50,
+                      child: pw.Text(
+                        totalAmount.toStringAsFixed(2),
+                        style: pw.TextStyle(font: tamilFontBold, fontSize: 11),
+                        textAlign: pw.TextAlign.right,
+                      ),
+                    ),
+                  ],
+                ),
+
+                pw.SizedBox(height: 10),
+                pw.Text(
+                  'நன்றி',
+                  style: pw.TextStyle(font: tamilFont, fontSize: 10),
+                ),
+                pw.Text(
+                  'மீண்டும் வாருங்கள்',
+                  style: pw.TextStyle(font: tamilFont, fontSize: 10),
+                ),
+              ],
+            );
+          },
+        ),
+      );
+
+      await Printing.layoutPdf(
+        onLayout: (PdfPageFormat format) async => pdf.save(),
+      );
+
+      // Rest of the code remains the same...
+    } catch (e) {
+      print('Error generating PDF: $e');
+    }
+  }
+
+  Future<void> _generatePDFNew() async {
+    try {
+      final pdf = pw.Document();
+
+      // Load Tamil font
+      final tamilFont = await PdfGoogleFonts.notoSansTamilRegular();
+      final tamilFontBold = await PdfGoogleFonts.notoSansTamilBold();
+
+      pdf.addPage(
+        pw.Page(
+          pageFormat: PdfPageFormat(
+            80 * PdfPageFormat.mm,
+            double.infinity,
+            marginAll: 5 * PdfPageFormat.mm,
+          ),
+          build: (pw.Context context) {
+            return pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.center,
+              children: [
+                // Header
+                pw.Text(
+                  'சேர்மன் சாமி துணை',
+                  style: pw.TextStyle(font: tamilFont, fontSize: 10),
+                ),
+                pw.Text(
+                  'மதிப்பீட்டு ரசீது',
+                  style: pw.TextStyle(font: tamilFontBold, fontSize: 12),
+                ),
+                pw.Text(
+                  shopName,
+                  style: pw.TextStyle(font: tamilFontBold, fontSize: 14),
+                ),
+                pw.Text(
+                  address,
+                  style: pw.TextStyle(font: tamilFont, fontSize: 10),
+                ),
+                pw.Text(
+                  city,
+                  style: pw.TextStyle(font: tamilFont, fontSize: 10),
+                ),
+                pw.Text(
+                  phone,
+                  style: pw.TextStyle(font: tamilFont, fontSize: 10),
+                ),
+                pw.SizedBox(height: 5),
+                pw.Row(
+                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                  children: [
+                    pw.Text(
+                      'No: $receiptNumber',
+                      style: pw.TextStyle(font: tamilFont, fontSize: 10),
+                    ),
+                    pw.Text(
+                      DateFormat(
+                        'hh:mm:ss a dd/MM/yyyy',
+                      ).format(DateTime.now()),
+                      style: pw.TextStyle(font: tamilFont, fontSize: 10),
+                    ),
+                  ],
+                ),
+                pw.Divider(),
+
+                // Table Header
+                pw.Row(
+                  children: [
+                    pw.Container(
+                      width: 120,
+                      child: pw.Text(
+                        'விபரங்கள்',
+                        style: pw.TextStyle(font: tamilFontBold, fontSize: 10),
+                      ),
+                    ),
+                    pw.Container(
+                      width: 35,
+                      child: pw.Text(
+                        'அளவு',
+                        style: pw.TextStyle(font: tamilFontBold, fontSize: 10),
+                        textAlign: pw.TextAlign.center,
+                      ),
+                    ),
+                    pw.Container(
+                      width: 35,
+                      child: pw.Text(
+                        'விலை',
+                        style: pw.TextStyle(font: tamilFontBold, fontSize: 10),
+                        textAlign: pw.TextAlign.right,
+                      ),
+                    ),
+                    pw.Container(
+                      width: 45,
+                      child: pw.Text(
+                        'தொகை',
+                        style: pw.TextStyle(font: tamilFontBold, fontSize: 10),
+                        textAlign: pw.TextAlign.right,
+                      ),
+                    ),
+                  ],
+                ),
+                pw.Divider(),
+
+                // Items with serial numbers
+                ...cartItems.asMap().entries.map((entry) {
+                  final index = entry.key + 1;
+                  final item = entry.value;
+
+                  // Format quantity with unit properly
+                  String quantityText = '';
+                  if (item.product.unit == 'கிலோ' ||
+                      item.product.unit == 'லிட்டர்') {
+                    // For weight/volume items, show as decimal
+                    quantityText =
+                        '${item.quantity.toStringAsFixed(3)}${item.product.unit}';
+                  } else if (item.product.unit == 'எண்' ||
+                      item.product.unit == 'பாக்கெட்') {
+                    // For countable items, show as integer if whole number
+                    if (item.quantity == item.quantity.toInt()) {
+                      quantityText =
+                          '${item.quantity.toInt()}${item.product.unit}';
+                    } else {
+                      quantityText =
+                          '${item.quantity.toStringAsFixed(1)}${item.product.unit}';
+                    }
+                  } else {
+                    quantityText =
+                        '${item.quantity.toStringAsFixed(1)}${item.product.unit}';
+                  }
+
+                  return pw.Padding(
+                    padding: pw.EdgeInsets.symmetric(vertical: 1),
+                    child: pw.Row(
+                      children: [
+                        // Product name with serial number
+                        pw.Container(
+                          width: 120,
+                          child: pw.Row(
+                            children: [
+                              pw.Container(
+                                width: 15,
+                                child: pw.Text(
+                                  '$index',
+                                  style: pw.TextStyle(
+                                    font: tamilFont,
+                                    fontSize: 9,
+                                  ),
+                                ),
+                              ),
+                              pw.Expanded(
+                                child: pw.Text(
+                                  item.product.tamilName,
+                                  style: pw.TextStyle(
+                                    font: tamilFont,
+                                    fontSize: 9,
+                                  ),
+                                  maxLines: 1,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        // Quantity
+                        pw.Container(
+                          width: 35,
+                          child: pw.Text(
+                            quantityText,
+                            style: pw.TextStyle(font: tamilFont, fontSize: 9),
+                            textAlign: pw.TextAlign.center,
+                          ),
+                        ),
+                        // Price
+                        pw.Container(
+                          width: 35,
+                          child: pw.Text(
+                            item.product.price.toStringAsFixed(2),
+                            style: pw.TextStyle(font: tamilFont, fontSize: 9),
+                            textAlign: pw.TextAlign.right,
+                          ),
+                        ),
+                        // Total
+                        pw.Container(
+                          width: 45,
+                          child: pw.Text(
+                            item.total.toStringAsFixed(2),
+                            style: pw.TextStyle(font: tamilFont, fontSize: 9),
+                            textAlign: pw.TextAlign.right,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }),
+
+                pw.Divider(),
+
+                // Total
+                pw.Row(
+                  children: [
+                    pw.Container(
+                      width: 190,
+                      child: pw.Text(
+                        'மொத்தம்',
+                        style: pw.TextStyle(font: tamilFontBold, fontSize: 11),
+                        textAlign: pw.TextAlign.right,
+                      ),
+                    ),
+                    pw.Container(
+                      width: 45,
+                      child: pw.Text(
+                        totalAmount.toStringAsFixed(2),
+                        style: pw.TextStyle(font: tamilFontBold, fontSize: 11),
+                        textAlign: pw.TextAlign.right,
+                      ),
+                    ),
+                  ],
+                ),
+
+                pw.SizedBox(height: 10),
+                pw.Text(
+                  'நன்றி',
+                  style: pw.TextStyle(font: tamilFont, fontSize: 10),
+                ),
+                pw.Text(
+                  'மீண்டும் வாருங்கள்',
+                  style: pw.TextStyle(font: tamilFont, fontSize: 10),
+                ),
+
+                // Optional: Add footer with shop details
+                pw.SizedBox(height: 10),
+                pw.Divider(),
+                pw.Text(
+                  '★பொருட்களை சரிபார்த்து எடுத்துக்கொள்ளவும்★',
+                  style: pw.TextStyle(font: tamilFont, fontSize: 8),
+                ),
+                pw.Text(
+                  'கூகுள்பேயும்பார் 8925463455',
+                  style: pw.TextStyle(font: tamilFont, fontSize: 8),
+                ),
+                pw.Text(
+                  '24 முதல்29விடுமுறை',
+                  style: pw.TextStyle(font: tamilFont, fontSize: 8),
+                ),
+              ],
+            );
+          },
+        ),
+      );
+
+      await Printing.layoutPdf(
+        onLayout: (PdfPageFormat format) async => pdf.save(),
+      );
+
+      // Save receipt to local database
+      await _saveReceiptToLocal();
+
+      // Try to sync with Firestore if online
+      if (isOnline) {
+        await _saveReceiptToFirestore();
+      }
+
+      // Increment receipt number for next receipt
+      await _incrementReceiptNumber();
+
+      // Clear cart after printing
+      _clearCart();
+    } catch (e) {
+      print('Error generating PDF: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('PDF உருவாக்குவதில் பிழை: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Future<void> _generatePDF() async {
+    try {
+      final pdf = pw.Document();
+
+      // Load Tamil font
+      final tamilFont = await fontFromAssetBundle(
+        'assets/fonts/NotoSansTamil-Regular.ttf',
+      );
+
+      // final tamilFont = await PdfGoogleFonts.germaniaOneRegular();
+
+      final tamilFontBold = await fontFromAssetBundle(
+        'assets/fonts/NotoSansTamil-Bold.ttf',
+      );
+
+      print('Tamil Font Loaded: $tamilFont');
+      print('Tamil Bold Font Loaded: $tamilFontBold');
+      print(
+        'Cart Items for PDF: ${cartItems.map((item) => item.product.tamilName).toList()}',
+      );
+      pdf.addPage(
+        pw.Page(
+          pageFormat: PdfPageFormat(
+            80 * PdfPageFormat.mm,
+            double.infinity,
+            marginAll: 5 * PdfPageFormat.mm,
+          ),
+          build: (pw.Context context) {
+            return pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.center,
+              children: [
+                // Header
+                pw.Text(
+                  //'சேர்மன் சாமி துணை',
+                  '"\u0BA4\u0BC1"',
+                  //'"\u0B85"',
+                  style: pw.TextStyle(font: tamilFont, fontSize: 10),
+                ),
+
                 pw.Text(
                   'மதிப்பீட்டு ரசீது',
                   style: pw.TextStyle(font: tamilFontBold, fontSize: 12),
@@ -819,6 +1325,10 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
 
       // Save receipt to local database
       await _saveReceiptToLocal();
+
+      //save in mobiledevice
+
+      await _saveReceiptInMobile();
 
       // Try to sync with Firestore if online
       if (isOnline) {
@@ -1044,7 +1554,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                                   Navigator.pop(
                                     context,
                                   ); // Close bottom sheet before generating PDF
-                                  _generatePDF();
+                                  _generatePDFWithTable();
                                 },
                           icon: Icon(Icons.print),
                           label: Text(tr('printReceipt')),

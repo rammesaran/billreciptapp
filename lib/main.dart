@@ -12,11 +12,16 @@ void main() async {
 class TamilReceiptApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'ரசீது உருவாக்கி',
-      theme: ThemeData(primarySwatch: Colors.blue, fontFamily: 'NotoSansTamil'),
-      home: ReceiptScreen(),
-      debugShowCheckedModeBanner: false,
+    return SafeArea(
+      child: MaterialApp(
+        title: 'ரசீது உருவாக்கி',
+        theme: ThemeData(
+          primarySwatch: Colors.blue,
+          fontFamily: 'NotoSansTamil',
+        ),
+        home: ReceiptScreen(),
+        debugShowCheckedModeBanner: false,
+      ),
     );
   }
 }

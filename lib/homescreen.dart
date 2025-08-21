@@ -27,6 +27,50 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
   List<Product> allProducts = [];
   List<Product> filteredProducts = [];
 
+  // Language support
+  bool isTamil = true;
+  Map<String, Map<String, String>> translations = {
+    'title': {'ta': 'ரசீது உருவாக்கி', 'en': 'Receipt Generator'},
+    'online': {'ta': 'ஆன்லைன்', 'en': 'Online'},
+    'offline': {'ta': 'ஆஃப்லைன்', 'en': 'Offline'},
+    'sync': {'ta': 'ஒத்திசை', 'en': 'Sync'},
+    'searchProduct': {'ta': 'பொருள் தேடு', 'en': 'Search Product'},
+    'searchHint': {'ta': 'பெயர் அல்லது பார்கோடு', 'en': 'Name or Barcode'},
+    'noProducts': {'ta': 'பொருட்கள் இல்லை', 'en': 'No Products'},
+    'searchToFind': {
+      'ta': 'பொருட்களை காண தேடவும்',
+      'en': 'Search to find products',
+    },
+    'addProduct': {'ta': 'புதிய பொருள் சேர்', 'en': 'Add New Product'},
+    'cart': {'ta': 'கூடை', 'en': 'Cart'},
+    'clear': {'ta': 'அழி', 'en': 'Clear'},
+    'emptyCart': {'ta': 'கூடை காலியாக உள்ளது', 'en': 'Cart is empty'},
+    'total': {'ta': 'மொத்தம்', 'en': 'Total'},
+    'printReceipt': {'ta': 'ரசீது அச்சிடு', 'en': 'Print Receipt'},
+    'lastSync': {'ta': 'கடைசி ஒத்திசைவு', 'en': 'Last Sync'},
+    'addedToCart': {'ta': 'கூடையில் சேர்க்கப்பட்டது', 'en': 'Added to cart'},
+    'syncSuccess': {
+      'ta': 'ஒத்திசைவு வெற்றிகரமாக முடிந்தது',
+      'en': 'Sync completed successfully',
+    },
+    'syncFailed': {
+      'ta': 'ஒத்திசைவு தோல்வி - உள்ளூர் முறையில் வேலை செய்கிறது',
+      'en': 'Sync failed - Working offline',
+    },
+    'quantity': {'ta': 'அளவு', 'en': 'Quantity'},
+    'price': {'ta': 'விலை', 'en': 'Price'},
+    'add': {'ta': 'சேர்', 'en': 'Add'},
+    'cancel': {'ta': 'ரத்து', 'en': 'Cancel'},
+    'enterQuantity': {'ta': 'அளவை உள்ளிடவும்', 'en': 'Enter quantity'},
+    'stock': {'ta': 'மிச்சம்', 'en': 'Stock'},
+    'retry': {'ta': 'மீண்டும் முயற்சிக்கவும்', 'en': 'Retry'},
+    'error': {'ta': 'பிழை ஏற்பட்டது', 'en': 'Error occurred'},
+  };
+
+  String tr(String key) {
+    return translations[key]?[isTamil ? 'ta' : 'en'] ?? key;
+  }
+
   // Shop Details
   String shopName = "ரேவதி ஸ்டோர்";
   String address = "எண்.9, பச்சையப்பன் தெரு";
@@ -36,8 +80,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
 
   bool isLoading = false;
   bool isOnline = true;
-  String selectedCategory = 'அனைத்தும்';
-  List<String> categories = ['அனைத்தும்'];
+  bool isSearching = false;
   DateTime? lastSync;
   String? errorMessage;
   bool isFirstLoad = true;
@@ -46,6 +89,22 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
   void initState() {
     super.initState();
     _initializeApp();
+    _loadLanguagePreference();
+  }
+
+  Future<void> _loadLanguagePreference() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      isTamil = prefs.getBool('isTamil') ?? true;
+    });
+  }
+
+  Future<void> _toggleLanguage() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      isTamil = !isTamil;
+    });
+    await prefs.setBool('isTamil', isTamil);
   }
 
   Future<void> _initializeApp() async {
@@ -76,6 +135,8 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
 
       setState(() {
         isFirstLoad = false;
+        // Don't show products by default
+        filteredProducts = [];
       });
     } catch (e) {
       print('Initialization error: $e');
@@ -154,19 +215,6 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
 
     try {
       await _dbHelper.batchInsertProducts(sampleProducts);
-
-      // Add sample categories
-      final sampleCategories = [
-        {'name': 'மளிகை', 'orderIndex': 1},
-        {'name': 'உணவு', 'orderIndex': 2},
-        {'name': 'பிஸ்கட்', 'orderIndex': 3},
-        {'name': 'பானம்', 'orderIndex': 4},
-      ];
-
-      for (var category in sampleCategories) {
-        await _dbHelper.insertCategory(category);
-      }
-
       print('Sample products added successfully');
     } catch (e) {
       print('Error adding sample products: $e');
@@ -252,16 +300,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
             isLocal: data['isLocal'] == 1,
           );
         }).toList();
-        filteredProducts = allProducts;
-      });
-
-      // Load categories
-      final localCategories = await _dbHelper.getCategories();
-      print('Loaded ${localCategories.length} categories');
-
-      setState(() {
-        categories = ['அனைத்தும்'];
-        categories.addAll(localCategories.map((c) => c['name'] as String));
+        // Don't set filteredProducts here, keep it empty until search
       });
 
       // Load sync status
@@ -353,35 +392,12 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                 isLocal: data['isLocal'] == 1,
               );
             }).toList();
-            filteredProducts = allProducts;
+            // Keep filteredProducts based on current search
+            if (_searchController.text.isNotEmpty) {
+              _filterProducts(_searchController.text);
+            }
           });
         }
-      }
-
-      // Sync categories
-      try {
-        final categorySnapshot = await _firestore
-            .collection('categories')
-            .get();
-        print(
-          'Fetched ${categorySnapshot.docs.length} categories from Firestore',
-        );
-
-        for (var doc in categorySnapshot.docs) {
-          await _dbHelper.insertCategory({
-            'name': doc.data()['name'] ?? '',
-            'orderIndex': doc.data()['order'] ?? 0,
-          });
-        }
-
-        // Update categories list
-        final localCategories = await _dbHelper.getCategories();
-        setState(() {
-          categories = ['அனைத்தும்'];
-          categories.addAll(localCategories.map((c) => c['name'] as String));
-        });
-      } catch (e) {
-        print('Category sync error (non-critical): $e');
       }
 
       // Sync unsynced receipts to Firestore
@@ -416,7 +432,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('ஒத்திசைவு வெற்றிகரமாக முடிந்தது'),
+            content: Text(tr('syncSuccess')),
             backgroundColor: Colors.green,
           ),
         );
@@ -426,7 +442,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('ஒத்திசைவு தோல்வி - உள்ளூர் முறையில் வேலை செய்கிறது'),
+            content: Text(tr('syncFailed')),
             backgroundColor: Colors.orange,
           ),
         );
@@ -464,53 +480,117 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
 
   void _filterProducts(String query) {
     setState(() {
-      if (query.isEmpty && selectedCategory == 'அனைத்தும்') {
-        filteredProducts = allProducts;
+      if (query.isEmpty) {
+        filteredProducts = [];
+        isSearching = false;
       } else {
+        isSearching = true;
         filteredProducts = allProducts.where((product) {
-          final matchesSearch =
-              query.isEmpty ||
-              product.name.toLowerCase().contains(query.toLowerCase()) ||
+          return product.name.toLowerCase().contains(query.toLowerCase()) ||
               product.tamilName.toLowerCase().contains(query.toLowerCase()) ||
               product.barcode.contains(query);
-
-          final matchesCategory =
-              selectedCategory == 'அனைத்தும்' ||
-              product.category == selectedCategory;
-
-          return matchesSearch && matchesCategory;
         }).toList();
       }
     });
   }
 
-  Future<void> _addToCart(Product product) async {
-    try {
-      // Add to local database
-      await _dbHelper.addToCart({
-        'productId': product.id,
-        'productName': product.name,
-        'productTamilName': product.tamilName,
-        'price': product.price,
-        'quantity': 1.0,
-        'unit': product.unit,
-      });
+  void _showQuantityDialog(Product product) {
+    final quantityController = TextEditingController(text: '1');
 
-      setState(() {
-        final existingIndex = cartItems.indexWhere(
-          (item) => item.product.id == product.id,
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Text(isTamil ? product.tamilName : product.name),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('${tr("price")}:'),
+                  Text('₹${product.price.toStringAsFixed(2)}/${product.unit}'),
+                ],
+              ),
+              if (product.stock < 10)
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text('${tr("stock")}:'),
+                    Text(
+                      '${product.stock}',
+                      style: TextStyle(color: Colors.red),
+                    ),
+                  ],
+                ),
+              SizedBox(height: 16),
+              TextField(
+                controller: quantityController,
+                decoration: InputDecoration(
+                  labelText: tr('enterQuantity'),
+                  border: OutlineInputBorder(),
+                ),
+                keyboardType: TextInputType.numberWithOptions(decimal: true),
+                autofocus: true,
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: Text(tr('cancel')),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                final quantity =
+                    double.tryParse(quantityController.text) ?? 1.0;
+                if (quantity > 0) {
+                  _addToCartWithQuantity(product, quantity);
+                  Navigator.of(context).pop();
+                }
+              },
+              child: Text(tr('add')),
+            ),
+          ],
         );
+      },
+    );
+  }
 
-        if (existingIndex != -1) {
-          cartItems[existingIndex].quantity++;
-        } else {
-          cartItems.add(CartItem(product: product, quantity: 1));
-        }
-      });
+  Future<void> _addToCartWithQuantity(Product product, double quantity) async {
+    try {
+      // Check if item already exists in cart
+      final existingIndex = cartItems.indexWhere(
+        (item) => item.product.id == product.id,
+      );
+
+      if (existingIndex != -1) {
+        // Update existing item quantity
+        final newQuantity = cartItems[existingIndex].quantity + quantity;
+        await _dbHelper.updateCartItem(product.id, newQuantity);
+        setState(() {
+          cartItems[existingIndex].quantity = newQuantity;
+        });
+      } else {
+        // Add new item to cart
+        await _dbHelper.addToCart({
+          'productId': product.id,
+          'productName': product.name,
+          'productTamilName': product.tamilName,
+          'price': product.price,
+          'quantity': quantity,
+          'unit': product.unit,
+        });
+        setState(() {
+          cartItems.add(CartItem(product: product, quantity: quantity));
+        });
+      }
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('${product.tamilName} கூடையில் சேர்க்கப்பட்டது'),
+          content: Text(
+            '${isTamil ? product.tamilName : product.name} ${tr("addedToCart")}',
+          ),
           duration: Duration(seconds: 1),
         ),
       );
@@ -823,7 +903,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     // Show error screen if there's a critical error
     if (errorMessage != null && allProducts.isEmpty) {
       return Scaffold(
-        appBar: AppBar(title: Text('ரசீது உருவாக்கி')),
+        appBar: AppBar(title: Text(tr('title'))),
         body: Center(
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -831,7 +911,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
               Icon(Icons.error_outline, size: 64, color: Colors.red),
               SizedBox(height: 16),
               Text(
-                'பிழை ஏற்பட்டது',
+                tr('error'),
                 style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
               ),
               SizedBox(height: 8),
@@ -843,7 +923,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
               SizedBox(height: 16),
               ElevatedButton(
                 onPressed: _initializeApp,
-                child: Text('மீண்டும் முயற்சிக்கவும்'),
+                child: Text(tr('retry')),
               ),
             ],
           ),
@@ -855,7 +935,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
       appBar: AppBar(
         title: Row(
           children: [
-            Text('ரசீது உருவாக்கி'),
+            Text(tr('title')),
             SizedBox(width: 10),
             Container(
               padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -873,7 +953,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                   ),
                   SizedBox(width: 4),
                   Text(
-                    isOnline ? 'ஆன்லைன்' : 'ஆஃப்லைன்',
+                    tr(isOnline ? 'online' : 'offline'),
                     style: TextStyle(fontSize: 12, color: Colors.white),
                   ),
                 ],
@@ -887,19 +967,23 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
             onPressed: isOnline && !isLoading
                 ? () => _syncWithFirestore(reloadAfterSync: true)
                 : null,
-            tooltip: 'ஒத்திசை',
+            tooltip: tr('sync'),
           ),
+          // Language toggle button
           IconButton(
-            icon: Icon(Icons.add),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => AddProductScreen(isOnline: isOnline),
-                ),
-              ).then((_) => _loadLocalData());
-            },
-            tooltip: 'புதிய பொருள்',
+            icon: Container(
+              padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.white),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                isTamil ? 'EN' : 'தமிழ்',
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+              ),
+            ),
+            onPressed: _toggleLanguage,
+            tooltip: isTamil ? 'Switch to English' : 'தமிழுக்கு மாற்று',
           ),
         ],
       ),
@@ -915,74 +999,80 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                   Icon(Icons.access_time, size: 14),
                   SizedBox(width: 4),
                   Text(
-                    'கடைசி ஒத்திசைவு: ${DateFormat('dd/MM hh:mm a').format(lastSync!)}',
+                    '${tr("lastSync")}: ${DateFormat('dd/MM hh:mm a').format(lastSync!)}',
                     style: TextStyle(fontSize: 12),
                   ),
                 ],
               ),
             ),
 
-          // Search and Filter Section
+          // Search Section
           Container(
             padding: EdgeInsets.all(8.0),
-            child: Column(
-              children: [
-                TextField(
-                  controller: _searchController,
-                  decoration: InputDecoration(
-                    labelText: 'பொருள் தேடு',
-                    hintText: 'பெயர் அல்லது பார்கோடு',
-                    prefixIcon: Icon(Icons.search),
-                    border: OutlineInputBorder(),
-                    suffixIcon: _searchController.text.isNotEmpty
-                        ? IconButton(
-                            icon: Icon(Icons.clear),
-                            onPressed: () {
-                              _searchController.clear();
-                              _filterProducts('');
-                            },
-                          )
-                        : null,
-                  ),
-                  onChanged: _filterProducts,
-                ),
-                SizedBox(height: 8),
-                SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    children: categories.map((category) {
-                      return Padding(
-                        padding: EdgeInsets.symmetric(horizontal: 4),
-                        child: ChoiceChip(
-                          label: Text(category),
-                          selected: selectedCategory == category,
-                          onSelected: (selected) {
-                            setState(() {
-                              selectedCategory = category;
-                            });
-                            _filterProducts(_searchController.text);
-                          },
-                        ),
-                      );
-                    }).toList(),
-                  ),
-                ),
-              ],
+            child: TextField(
+              controller: _searchController,
+              decoration: InputDecoration(
+                labelText: tr('searchProduct'),
+                hintText: tr('searchHint'),
+                prefixIcon: Icon(Icons.search),
+                border: OutlineInputBorder(),
+                suffixIcon: _searchController.text.isNotEmpty
+                    ? IconButton(
+                        icon: Icon(Icons.clear),
+                        onPressed: () {
+                          _searchController.clear();
+                          _filterProducts('');
+                        },
+                      )
+                    : null,
+              ),
+              onChanged: _filterProducts,
             ),
           ),
 
-          // Products Grid
+          // Products Grid / Search Instructions
           Expanded(
             flex: 3,
             child: isLoading
                 ? Center(child: CircularProgressIndicator())
+                : !isSearching
+                ? Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.search, size: 64, color: Colors.grey),
+                        SizedBox(height: 16),
+                        Text(
+                          tr('searchToFind'),
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: Colors.grey[600],
+                          ),
+                        ),
+                        SizedBox(height: 16),
+                        OutlinedButton.icon(
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) =>
+                                    AddProductScreen(isOnline: isOnline),
+                              ),
+                            ).then((_) => _loadLocalData());
+                          },
+                          icon: Icon(Icons.add),
+                          label: Text(tr('addProduct')),
+                        ),
+                      ],
+                    ),
+                  )
                 : filteredProducts.isEmpty
                 ? Center(
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Icon(Icons.inventory_2, size: 64, color: Colors.grey),
-                        Text('பொருட்கள் இல்லை'),
+                        Text(tr('noProducts')),
                         TextButton(
                           onPressed: () {
                             Navigator.push(
@@ -993,7 +1083,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                               ),
                             ).then((_) => _loadLocalData());
                           },
-                          child: Text('புதிய பொருள் சேர்'),
+                          child: Text(tr('addProduct')),
                         ),
                       ],
                     ),
@@ -1012,7 +1102,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                       return Card(
                         elevation: 2,
                         child: InkWell(
-                          onTap: () => _addToCart(product),
+                          onTap: () => _showQuantityDialog(product),
                           child: Stack(
                             children: [
                               Padding(
@@ -1021,7 +1111,9 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
                                     Text(
-                                      product.tamilName,
+                                      isTamil
+                                          ? product.tamilName
+                                          : product.name,
                                       style: TextStyle(
                                         fontWeight: FontWeight.bold,
                                         fontSize: 14,
@@ -1030,22 +1122,25 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                                       maxLines: 2,
                                       overflow: TextOverflow.ellipsis,
                                     ),
-                                    SizedBox(height: 4),
-                                    Text(
-                                      '₹${product.price.toStringAsFixed(2)}/${product.unit}',
-                                      style: TextStyle(
-                                        color: Colors.green,
-                                        fontSize: 12,
+                                    SizedBox(height: 8),
+                                    Container(
+                                      padding: EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 4,
                                       ),
-                                    ),
-                                    if (product.stock < 10)
-                                      Text(
-                                        'மிச்சம்: ${product.stock}',
+                                      decoration: BoxDecoration(
+                                        color: Colors.green[50],
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: Text(
+                                        '₹${product.price.toStringAsFixed(2)}',
                                         style: TextStyle(
-                                          color: Colors.red,
-                                          fontSize: 10,
+                                          color: Colors.green[700],
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 16,
                                         ),
                                       ),
+                                    ),
                                   ],
                                 ),
                               ),
@@ -1087,7 +1182,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        'கூடை (${cartItems.length})',
+                        '${tr("cart")} (${cartItems.length})',
                         style: TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
@@ -1097,7 +1192,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                         TextButton(
                           onPressed: _clearCart,
                           child: Text(
-                            'அழி',
+                            tr('clear'),
                             style: TextStyle(color: Colors.red),
                           ),
                         ),
@@ -1106,13 +1201,17 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                 ),
                 Expanded(
                   child: cartItems.isEmpty
-                      ? Center(child: Text('கூடை காலியாக உள்ளது'))
+                      ? Center(child: Text(tr('emptyCart')))
                       : ListView.builder(
                           itemCount: cartItems.length,
                           itemBuilder: (context, index) {
                             final item = cartItems[index];
                             return ListTile(
-                              title: Text(item.product.tamilName),
+                              title: Text(
+                                isTamil
+                                    ? item.product.tamilName
+                                    : item.product.name,
+                              ),
                               subtitle: Text(
                                 '₹${item.product.price} × ${item.quantity}${item.product.unit}',
                               ),
@@ -1170,7 +1269,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           Text(
-                            'மொத்தம்:',
+                            '${tr("total")}:',
                             style: TextStyle(
                               fontSize: 20,
                               fontWeight: FontWeight.bold,
@@ -1189,7 +1288,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                       ElevatedButton.icon(
                         onPressed: cartItems.isEmpty ? null : _generatePDF,
                         icon: Icon(Icons.print),
-                        label: Text('ரசீது அச்சிடு'),
+                        label: Text(tr('printReceipt')),
                         style: ElevatedButton.styleFrom(
                           minimumSize: Size(double.infinity, 50),
                           backgroundColor: Colors.green,

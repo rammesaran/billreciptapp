@@ -898,6 +898,173 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     }
   }
 
+  void _showCartBottomSheet() {
+    showModalBottomSheet(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (BuildContext context, StateSetter setModalState) {
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.5,
+              color: Colors.white,
+              child: Column(
+                children: [
+                  Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          '${tr("cart")} (${cartItems.length})',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        if (cartItems.isNotEmpty)
+                          TextButton(
+                            onPressed: () {
+                              _clearCart();
+                              setModalState(() {});
+                            },
+                            child: Text(
+                              tr('clear'),
+                              style: TextStyle(color: Colors.red),
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: cartItems.isEmpty
+                        ? Center(child: Text(tr('emptyCart')))
+                        : ListView.builder(
+                            itemCount: cartItems.length,
+                            itemBuilder: (context, index) {
+                              final item = cartItems[index];
+                              return ListTile(
+                                title: Text(
+                                  isTamil
+                                      ? item.product.tamilName
+                                      : item.product.name,
+                                ),
+                                subtitle: Text(
+                                  '₹${item.product.price} × ${item.quantity}${item.product.unit}',
+                                ),
+                                trailing: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      '₹${item.total.toStringAsFixed(2)}',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    IconButton(
+                                      icon: Icon(
+                                        Icons.remove_circle,
+                                        color: Colors.orange,
+                                      ),
+                                      onPressed: () {
+                                        _updateQuantity(
+                                          index,
+                                          item.quantity - 1,
+                                        );
+                                        setModalState(() {});
+                                      },
+                                    ),
+                                    Text(
+                                      '${item.quantity.toStringAsFixed(0)}',
+                                      style: TextStyle(fontSize: 16),
+                                    ),
+                                    IconButton(
+                                      icon: Icon(
+                                        Icons.add_circle,
+                                        color: Colors.green,
+                                      ),
+                                      onPressed: () {
+                                        _updateQuantity(
+                                          index,
+                                          item.quantity + 1,
+                                        );
+                                        setModalState(() {});
+                                      },
+                                    ),
+                                    IconButton(
+                                      icon: Icon(
+                                        Icons.delete,
+                                        color: Colors.red,
+                                      ),
+                                      onPressed: () {
+                                        _removeFromCart(index);
+                                        setModalState(() {});
+                                      },
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                  Container(
+                    padding: EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.grey[200],
+                      borderRadius: BorderRadius.only(
+                        topLeft: Radius.circular(16),
+                        topRight: Radius.circular(16),
+                      ),
+                    ),
+                    child: Column(
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              '${tr("total")}:',
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            Text(
+                              '₹${totalAmount.toStringAsFixed(2)}',
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        SizedBox(height: 10),
+                        ElevatedButton.icon(
+                          onPressed: cartItems.isEmpty
+                              ? null
+                              : () {
+                                  Navigator.pop(
+                                    context,
+                                  ); // Close bottom sheet before generating PDF
+                                  _generatePDF();
+                                },
+                          icon: Icon(Icons.print),
+                          label: Text(tr('printReceipt')),
+                          style: ElevatedButton.styleFrom(
+                            minimumSize: Size(double.infinity, 50),
+                            backgroundColor: Colors.green,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     // Show error screen if there's a critical error
@@ -935,7 +1102,15 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
       appBar: AppBar(
         title: Row(
           children: [
-            Text(tr('title')),
+            Expanded(
+              child: FittedBox(
+                child: Text(
+                  tr('title'),
+                  style: TextStyle(fontSize: 22), // Adjust font size if needed
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
             SizedBox(width: 10),
             Container(
               padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -968,6 +1143,33 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                 ? () => _syncWithFirestore(reloadAfterSync: true)
                 : null,
             tooltip: tr('sync'),
+          ),
+          IconButton(
+            icon: Stack(
+              children: [
+                Icon(Icons.shopping_cart),
+                if (cartItems.isNotEmpty)
+                  Positioned(
+                    right: 0,
+                    top: 0,
+                    child: Container(
+                      padding: EdgeInsets.all(2),
+                      decoration: BoxDecoration(
+                        color: Colors.red,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      constraints: BoxConstraints(minWidth: 16, minHeight: 16),
+                      child: Text(
+                        '${cartItems.length}',
+                        style: TextStyle(color: Colors.white, fontSize: 10),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+            onPressed: _showCartBottomSheet,
+            tooltip: tr('cart'),
           ),
           // Language toggle button
           IconButton(
@@ -1032,7 +1234,6 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
 
           // Products Grid / Search Instructions
           Expanded(
-            flex: 3,
             child: isLoading
                 ? Center(child: CircularProgressIndicator())
                 : !isSearching
@@ -1048,20 +1249,6 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                             fontSize: 16,
                             color: Colors.grey[600],
                           ),
-                        ),
-                        SizedBox(height: 16),
-                        OutlinedButton.icon(
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) =>
-                                    AddProductScreen(isOnline: isOnline),
-                              ),
-                            ).then((_) => _loadLocalData());
-                          },
-                          icon: Icon(Icons.add),
-                          label: Text(tr('addProduct')),
                         ),
                       ],
                     ),
@@ -1167,138 +1354,6 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                       );
                     },
                   ),
-          ),
-
-          Divider(thickness: 2),
-
-          // Cart Section
-          Expanded(
-            flex: 2,
-            child: Column(
-              children: [
-                Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        '${tr("cart")} (${cartItems.length})',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      if (cartItems.isNotEmpty)
-                        TextButton(
-                          onPressed: _clearCart,
-                          child: Text(
-                            tr('clear'),
-                            style: TextStyle(color: Colors.red),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-                Expanded(
-                  child: cartItems.isEmpty
-                      ? Center(child: Text(tr('emptyCart')))
-                      : ListView.builder(
-                          itemCount: cartItems.length,
-                          itemBuilder: (context, index) {
-                            final item = cartItems[index];
-                            return ListTile(
-                              title: Text(
-                                isTamil
-                                    ? item.product.tamilName
-                                    : item.product.name,
-                              ),
-                              subtitle: Text(
-                                '₹${item.product.price} × ${item.quantity}${item.product.unit}',
-                              ),
-                              trailing: Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    '₹${item.total.toStringAsFixed(2)}',
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  IconButton(
-                                    icon: Icon(
-                                      Icons.remove_circle,
-                                      color: Colors.orange,
-                                    ),
-                                    onPressed: () => _updateQuantity(
-                                      index,
-                                      item.quantity - 1,
-                                    ),
-                                  ),
-                                  IconButton(
-                                    icon: Icon(
-                                      Icons.add_circle,
-                                      color: Colors.green,
-                                    ),
-                                    onPressed: () => _updateQuantity(
-                                      index,
-                                      item.quantity + 1,
-                                    ),
-                                  ),
-                                  IconButton(
-                                    icon: Icon(Icons.delete, color: Colors.red),
-                                    onPressed: () => _removeFromCart(index),
-                                  ),
-                                ],
-                              ),
-                            );
-                          },
-                        ),
-                ),
-                Container(
-                  padding: EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: Colors.grey[200],
-                    borderRadius: BorderRadius.only(
-                      topLeft: Radius.circular(16),
-                      topRight: Radius.circular(16),
-                    ),
-                  ),
-                  child: Column(
-                    children: [
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            '${tr("total")}:',
-                            style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          Text(
-                            '₹${totalAmount.toStringAsFixed(2)}',
-                            style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                      SizedBox(height: 10),
-                      ElevatedButton.icon(
-                        onPressed: cartItems.isEmpty ? null : _generatePDF,
-                        icon: Icon(Icons.print),
-                        label: Text(tr('printReceipt')),
-                        style: ElevatedButton.styleFrom(
-                          minimumSize: Size(double.infinity, 50),
-                          backgroundColor: Colors.green,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
           ),
         ],
       ),

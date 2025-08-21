@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "743112751029",
+    "project_id": "newtamilreciptapp",
+    "storage_bucket": "newtamilreciptapp.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:743112751029:android:369cb3c0ef5fc8cc41cbfc",
+        "android_client_info": {
+          "package_name": "com.example.billreciptapp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyChHHVw0z_iaIFYQMYTmjObYQEMM3JbFrg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

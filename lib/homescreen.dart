@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
-
+import 'dart:async';
 import 'package:billreciptapp/addproductscreen.dart';
 import 'package:billreciptapp/databasehelper.dart';
 import 'package:billreciptapp/usermodel.dart';
@@ -9,12 +9,12 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:pdf/pdf.dart' hide PdfDocument, PdfFont, PdfColor;
+import 'package:pdf/pdf.dart';
 import 'package:printing/printing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:pdf/widgets.dart' as pw;
-import 'package:syncfusion_flutter_pdf/pdf.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 class ReceiptScreen extends StatefulWidget {
   @override
@@ -27,9 +27,14 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
   final _searchController = TextEditingController();
   final Connectivity _connectivity = Connectivity();
 
+  // Firestore listeners
+  StreamSubscription<QuerySnapshot>? _productsListener;
+  StreamSubscription<DocumentSnapshot>? _shopDetailsListener;
+
   List<CartItem> cartItems = [];
   List<Product> allProducts = [];
   List<Product> filteredProducts = [];
+
   // Language support
   bool isTamil = true;
   Map<String, Map<String, String>> translations = {
@@ -50,8 +55,11 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     'emptyCart': {'ta': 'கூடை காலியாக உள்ளது', 'en': 'Cart is empty'},
     'total': {'ta': 'மொத்தம்', 'en': 'Total'},
     'printReceipt': {'ta': 'ரசீது அச்சிடு', 'en': 'Print Receipt'},
+    'shareReceipt': {'ta': 'பகிர்', 'en': 'Share'},
+    'saveReceipt': {'ta': 'சேமி', 'en': 'Save'},
     'lastSync': {'ta': 'கடைசி ஒத்திசைவு', 'en': 'Last Sync'},
     'addedToCart': {'ta': 'கூடையில் சேர்க்கப்பட்டது', 'en': 'Added to cart'},
+    'alreadyInCart': {'ta': 'ஏற்கனவே கூடையில் உள்ளது', 'en': 'Already in cart'},
     'syncSuccess': {
       'ta': 'ஒத்திசைவு வெற்றிகரமாக முடிந்தது',
       'en': 'Sync completed successfully',
@@ -68,17 +76,36 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     'stock': {'ta': 'மிச்சம்', 'en': 'Stock'},
     'retry': {'ta': 'மீண்டும் முயற்சிக்கவும்', 'en': 'Retry'},
     'error': {'ta': 'பிழை ஏற்பட்டது', 'en': 'Error occurred'},
+    'productsFound': {'ta': 'பொருட்கள் கிடைத்தது', 'en': 'products found'},
+    'details': {'ta': 'விபரங்கள்', 'en': 'Details'},
+    'qty': {'ta': 'அளவு', 'en': 'Qty'},
+    'rate': {'ta': 'விலை', 'en': 'Rate'},
+    'amount': {'ta': 'தொகை', 'en': 'Amount'},
+    'thanks': {'ta': 'நன்றி', 'en': 'Thank You'},
+    'visitAgain': {'ta': 'மீண்டும் வாருங்கள்', 'en': 'Visit Again'},
+    'receipt': {'ta': 'மதிப்பீட்டு ரசீது', 'en': 'Receipt'},
+    'savedSuccess': {
+      'ta': 'ரசீது சேமிக்கப்பட்டது',
+      'en': 'Receipt saved successfully',
+    },
   };
 
   String tr(String key) {
     return translations[key]?[isTamil ? 'ta' : 'en'] ?? key;
   }
 
-  // Shop Details
-  String shopName = "ரேவதி ஸ்டோர்";
-  String address = "எண்.9, பச்சையப்பன் தெரு";
-  String city = "மேற்கு ஜாபர்கான்பேட்டை, சென்னை-2";
-  String phone = "போன் 8056115927";
+  // Shop Details from Firebase
+  String shopNameTamil = "ரேவதி ஸ்டோர்";
+  String shopNameEnglish = "Revathi Store";
+  String addressTamil = "எண்.9, பச்சையப்பன் தெரு";
+  String addressEnglish = "No.9, Pachaiappan Street";
+  String cityTamil = "மேற்கு ஜாபர்கான்பேட்டை, சென்னை-2";
+  String cityEnglish = "West Jafferkhanpet, Chennai-2";
+  String phone = "8056115927";
+  String headerText = "சேர்மன் சாமி துணை";
+  String footerText1 = "★பொருட்களை சரிபார்த்து எடுத்துக்கொள்ளவும்★";
+  String footerText2 = "கூகுள்பேயும்பார் 8925463455";
+  String footerText3 = "24 முதல்29விடுமுறை";
   int receiptNumber = 3386;
 
   bool isLoading = false;
@@ -93,6 +120,91 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     super.initState();
     _initializeApp();
     _loadLanguagePreference();
+    _setupRealtimeListeners();
+    _loadShopDetails();
+  }
+
+  void _setupRealtimeListeners() {
+    // Listen to products collection changes
+    _productsListener = _firestore.collection('products').snapshots().listen((
+      snapshot,
+    ) {
+      if (!isFirstLoad) {
+        _handleProductsUpdate(snapshot);
+      }
+    });
+  }
+
+  void _handleProductsUpdate(QuerySnapshot snapshot) {
+    final products = snapshot.docs.map((doc) {
+      final data = doc.data() as Map<String, dynamic>;
+      return Product(
+        id: doc.id,
+        name: data['name'] ?? '',
+        tamilName: data['tamilName'] ?? '',
+        price: (data['price'] ?? 0.0).toDouble(),
+        unit: data['unit'] ?? 'எண்',
+        category: data['category'] ?? 'பொது',
+        barcode: data['barcode'] ?? '',
+        stock: (data['stock'] ?? 0.0).toDouble(),
+        isLocal: false,
+      );
+    }).toList();
+
+    setState(() {
+      allProducts = products;
+      if (_searchController.text.isNotEmpty) {
+        _filterProducts(_searchController.text);
+      }
+    });
+
+    // Update local database
+    _updateLocalProducts(products);
+  }
+
+  Future<void> _updateLocalProducts(List<Product> products) async {
+    final productMaps = products
+        .map(
+          (p) => {
+            'id': p.id,
+            'name': p.name,
+            'tamilName': p.tamilName,
+            'price': p.price,
+            'unit': p.unit,
+            'category': p.category,
+            'barcode': p.barcode,
+            'stock': p.stock,
+            'lastSynced': DateTime.now().toIso8601String(),
+            'isLocal': 0,
+          },
+        )
+        .toList();
+
+    await _dbHelper.batchInsertProducts(productMaps);
+  }
+
+  Future<void> _loadShopDetails() async {
+    try {
+      final doc = await _firestore.collection('settings').doc('shop').get();
+      if (doc.exists) {
+        final data = doc.data()!;
+        setState(() {
+          shopNameTamil = data['shopNameTamil'] ?? shopNameTamil;
+          shopNameEnglish = data['shopNameEnglish'] ?? shopNameEnglish;
+          addressTamil = data['addressTamil'] ?? addressTamil;
+          addressEnglish = data['addressEnglish'] ?? addressEnglish;
+          cityTamil = data['cityTamil'] ?? cityTamil;
+          cityEnglish = data['cityEnglish'] ?? cityEnglish;
+          phone = data['phone'] ?? phone;
+          headerText = data['headerText'] ?? headerText;
+          footerText1 = data['footerText1'] ?? footerText1;
+          footerText2 = data['footerText2'] ?? footerText2;
+          footerText3 = data['footerText3'] ?? footerText3;
+        });
+      }
+    } catch (e) {
+      print('Error loading shop details: $e');
+    }
   }
 
   Future<void> _loadLanguagePreference() async {
@@ -112,25 +224,13 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
 
   Future<void> _initializeApp() async {
     try {
-      // Initialize database first
       await _dbHelper.database;
-
-      // Check connectivity
       await _checkConnectivity();
-
-      // Load receipt number
       await _loadReceiptNumber();
-
-      // Load local data
       await _loadLocalData();
-
-      // Restore cart
       await _restoreCart();
-
-      // Setup connectivity listener
       _setupConnectivityListener();
 
-      // Add sample products if database is empty (first time)
       if (allProducts.isEmpty && isFirstLoad) {
         await _addSampleProducts();
         await _loadLocalData();
@@ -138,14 +238,13 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
 
       setState(() {
         isFirstLoad = false;
-        // Don't show products by default
         filteredProducts = [];
       });
     } catch (e) {
       print('Initialization error: $e');
       setState(() {
         isLoading = false;
-        errorMessage = 'பயன்பாட்டை துவக்குவதில் பிழை: $e';
+        errorMessage = 'Error initializing app: $e';
       });
     }
   }
@@ -166,54 +265,6 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
         'lastSynced': DateTime.now().toIso8601String(),
         'isLocal': 1,
       },
-      {
-        'id': 'sample_2',
-        'name': 'Maggi',
-        'tamilName': 'மேகி',
-        'price': 14.0,
-        'unit': 'பாக்கெட்',
-        'category': 'உணவு',
-        'barcode': '8901058894857',
-        'stock': 100.0,
-        'lastSynced': DateTime.now().toIso8601String(),
-        'isLocal': 1,
-      },
-      {
-        'id': 'sample_3',
-        'name': 'Milk Bikis',
-        'tamilName': 'பால் பிகிஸ்',
-        'price': 10.0,
-        'unit': 'பாக்கெட்',
-        'category': 'பிஸ்கட்',
-        'barcode': '8901063138803',
-        'stock': 200.0,
-        'lastSynced': DateTime.now().toIso8601String(),
-        'isLocal': 1,
-      },
-      {
-        'id': 'sample_4',
-        'name': 'Sugar 1kg',
-        'tamilName': 'சர்க்கரை 1கிலோ',
-        'price': 42.0,
-        'unit': 'பாக்கெட்',
-        'category': 'மளிகை',
-        'barcode': '2345678901',
-        'stock': 60.0,
-        'lastSynced': DateTime.now().toIso8601String(),
-        'isLocal': 1,
-      },
-      {
-        'id': 'sample_5',
-        'name': 'Tea Powder',
-        'tamilName': 'டீ பவுடர்',
-        'price': 55.0,
-        'unit': 'பாக்கெட்',
-        'category': 'பானம்',
-        'barcode': '8901063174577',
-        'stock': 80.0,
-        'lastSynced': DateTime.now().toIso8601String(),
-        'isLocal': 1,
-      },
     ];
 
     try {
@@ -231,7 +282,6 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
         isOnline = result != ConnectivityResult.none;
       });
 
-      // Only sync when coming back online from offline
       if (isOnline && wasOffline && !isLoading) {
         _syncWithFirestore(reloadAfterSync: true);
       }
@@ -244,9 +294,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
       setState(() {
         isOnline = result != ConnectivityResult.none;
       });
-      print('Connectivity status: $isOnline');
     } catch (e) {
-      print('Connectivity check error: $e');
       setState(() {
         isOnline = false;
       });
@@ -257,9 +305,8 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     try {
       final prefs = await SharedPreferences.getInstance();
       setState(() {
-        receiptNumber = prefs.getInt('receiptNumber') ?? 1;
+        receiptNumber = prefs.getInt('receiptNumber') ?? 3386;
       });
-      print('Receipt number loaded: $receiptNumber');
     } catch (e) {
       print('Error loading receipt number: $e');
     }
@@ -278,16 +325,13 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
   }
 
   Future<void> _loadLocalData() async {
-    print('Loading local data...');
     setState(() {
       isLoading = true;
       errorMessage = null;
     });
 
     try {
-      // Load products from local database
       final localProducts = await _dbHelper.getProducts();
-      print('Loaded ${localProducts.length} products from local database');
 
       setState(() {
         allProducts = localProducts.map((data) {
@@ -303,27 +347,20 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
             isLocal: data['isLocal'] == 1,
           );
         }).toList();
-        // Don't set filteredProducts here, keep it empty until search
       });
 
-      // Load sync status
       final syncStatus = await _dbHelper.getSyncStatus();
       if (syncStatus != null && syncStatus['lastProductSync'] != null) {
         lastSync = DateTime.parse(syncStatus['lastProductSync']);
-        print('Last sync: $lastSync');
       }
 
-      // Try to sync with Firestore if online (only if not first load)
       if (isOnline && !isFirstLoad) {
-        print('Attempting to sync with Firestore...');
-        await _syncWithFirestore(
-          reloadAfterSync: false,
-        ); // Don't reload to avoid loop
+        await _syncWithFirestore(reloadAfterSync: false);
       }
     } catch (e) {
       print('Error loading local data: $e');
       setState(() {
-        errorMessage = 'தரவை ஏற்றுவதில் பிழை: $e';
+        errorMessage = 'Error loading data: $e';
       });
     } finally {
       setState(() {
@@ -333,30 +370,14 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
   }
 
   Future<void> _syncWithFirestore({bool reloadAfterSync = false}) async {
-    if (!isOnline) {
-      print('Cannot sync - offline mode');
-      return;
-    }
-
-    print('Starting Firestore sync...');
+    if (!isOnline) return;
 
     try {
-      // Check if Firestore is available
-      final testConnection = await _firestore
-          .collection('products')
-          .limit(1)
-          .get()
-          .timeout(Duration(seconds: 5));
-
-      print('Firestore connection successful');
-
-      // Sync products from Firestore to local
       final snapshot = await _firestore
           .collection('products')
           .orderBy('name')
-          .get();
-
-      print('Fetched ${snapshot.docs.length} products from Firestore');
+          .get()
+          .timeout(Duration(seconds: 5));
 
       if (snapshot.docs.isNotEmpty) {
         final firestoreProducts = snapshot.docs.map((doc) {
@@ -375,11 +396,8 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
           };
         }).toList();
 
-        // Batch insert products to local database
         await _dbHelper.batchInsertProducts(firestoreProducts);
-        print('Products synced to local database');
 
-        // Update the local products list without calling _loadLocalData
         if (reloadAfterSync) {
           setState(() {
             allProducts = firestoreProducts.map((data) {
@@ -395,7 +413,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                 isLocal: data['isLocal'] == 1,
               );
             }).toList();
-            // Keep filteredProducts based on current search
+
             if (_searchController.text.isNotEmpty) {
               _filterProducts(_searchController.text);
             }
@@ -403,10 +421,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
         }
       }
 
-      // Sync unsynced receipts to Firestore
       final unsyncedReceipts = await _dbHelper.getUnsyncedReceipts();
-      print('Found ${unsyncedReceipts.length} unsynced receipts');
-
       for (var receipt in unsyncedReceipts) {
         try {
           final docRef = await _firestore.collection('receipts').add({
@@ -414,23 +429,19 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
             'timestamp': receipt['timestamp'],
             'items': jsonDecode(receipt['items']),
             'totalAmount': receipt['totalAmount'],
-            'shopName': receipt['shopName'],
+            'shopName': isTamil ? shopNameTamil : shopNameEnglish,
           });
 
           await _dbHelper.markReceiptSynced(receipt['id'], docRef.id);
-          print('Receipt ${receipt['receiptNumber']} synced');
         } catch (e) {
-          print('Error syncing receipt ${receipt['receiptNumber']}: $e');
+          print('Error syncing receipt: $e');
         }
       }
 
-      // Update sync status
       await _dbHelper.updateSyncStatus('products', DateTime.now());
       setState(() {
         lastSync = DateTime.now();
       });
-
-      print('Sync completed successfully');
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -456,7 +467,6 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
   Future<void> _restoreCart() async {
     try {
       final cartData = await _dbHelper.getCartItems();
-      print('Restored ${cartData.length} cart items');
 
       setState(() {
         cartItems = cartData.map((item) {
@@ -497,7 +507,25 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     });
   }
 
+  bool _isProductInCart(String productId) {
+    return cartItems.any((item) => item.product.id == productId);
+  }
+
   void _showQuantityDialog(Product product) {
+    // Check if already in cart
+    if (_isProductInCart(product.id)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${isTamil ? product.tamilName : product.name} ${tr("alreadyInCart")}',
+          ),
+          backgroundColor: Colors.orange,
+          duration: Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
     final quantityController = TextEditingController(text: '1');
 
     showDialog(
@@ -533,7 +561,10 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                   labelText: tr('enterQuantity'),
                   border: OutlineInputBorder(),
                 ),
-                keyboardType: TextInputType.numberWithOptions(decimal: true),
+                keyboardType: TextInputType.number,
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                ],
                 autofocus: true,
               ),
             ],
@@ -562,32 +593,18 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
 
   Future<void> _addToCartWithQuantity(Product product, double quantity) async {
     try {
-      // Check if item already exists in cart
-      final existingIndex = cartItems.indexWhere(
-        (item) => item.product.id == product.id,
-      );
+      await _dbHelper.addToCart({
+        'productId': product.id,
+        'productName': product.name,
+        'productTamilName': product.tamilName,
+        'price': product.price,
+        'quantity': quantity,
+        'unit': product.unit,
+      });
 
-      if (existingIndex != -1) {
-        // Update existing item quantity
-        final newQuantity = cartItems[existingIndex].quantity + quantity;
-        await _dbHelper.updateCartItem(product.id, newQuantity);
-        setState(() {
-          cartItems[existingIndex].quantity = newQuantity;
-        });
-      } else {
-        // Add new item to cart
-        await _dbHelper.addToCart({
-          'productId': product.id,
-          'productName': product.name,
-          'productTamilName': product.tamilName,
-          'price': product.price,
-          'quantity': quantity,
-          'unit': product.unit,
-        });
-        setState(() {
-          cartItems.add(CartItem(product: product, quantity: quantity));
-        });
-      }
+      setState(() {
+        cartItems.add(CartItem(product: product, quantity: quantity));
+      });
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -605,15 +622,15 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
   Future<void> _updateQuantity(int index, double quantity) async {
     try {
       final item = cartItems[index];
-      await _dbHelper.updateCartItem(item.product.id, quantity);
 
-      setState(() {
-        if (quantity <= 0) {
-          cartItems.removeAt(index);
-        } else {
+      if (quantity <= 0) {
+        await _removeFromCart(index);
+      } else {
+        await _dbHelper.updateCartItem(item.product.id, quantity);
+        setState(() {
           cartItems[index].quantity = quantity;
-        }
-      });
+        });
+      }
     } catch (e) {
       print('Error updating quantity: $e');
     }
@@ -623,7 +640,6 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     try {
       final item = cartItems[index];
       await _dbHelper.updateCartItem(item.product.id, 0);
-
       setState(() {
         cartItems.removeAt(index);
       });
@@ -645,710 +661,260 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
 
   double get totalAmount => cartItems.fold(0, (sum, item) => sum + item.total);
 
-  Future<void> _saveReceiptInMobile() async {
+  Future<void> _generateAndActionPDF(String action) async {
+    try {
+      final Uint8List pdf = await _generatePDF();
+
+      if (action == 'print') {
+        await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => pdf);
+      } else if (action == 'save') {
+        final directory = await getApplicationDocumentsDirectory();
+        final file = File('${directory.path}/receipt_$receiptNumber.pdf');
+        await file.writeAsBytes(pdf);
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(tr('savedSuccess')),
+            backgroundColor: Colors.green,
+          ),
+        );
+      } else if (action == 'share') {
+        final directory = await getTemporaryDirectory();
+        final file = File('${directory.path}/receipt_$receiptNumber.pdf');
+        await file.writeAsBytes(pdf);
+
+        await Share.shareXFiles(
+          [XFile(file.path)],
+          text:
+              '${isTamil ? shopNameTamil : shopNameEnglish} - Receipt #$receiptNumber',
+        );
+      }
+
+      await _saveReceiptToLocal();
+      if (isOnline) {
+        await _saveReceiptToFirestore();
+      }
+      await _incrementReceiptNumber();
+      _clearCart();
+    } catch (e) {
+      print('Error with PDF: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+      );
+    }
+  }
+
+  Future<Uint8List> _generatePDF() async {
     final pdf = pw.Document();
 
-    int counter = 1;
-    final output = await getTemporaryDirectory();
-    final file = File("${output.path}/bill${counter + 1}.pdf");
-    print("the file name is $file");
+    final tamilFont = await PdfGoogleFonts.notoSansTamilRegular();
+    final tamilFontBold = await PdfGoogleFonts.notoSansTamilBold();
+    final englishFont = await PdfGoogleFonts.robotoRegular();
+    final englishFontBold = await PdfGoogleFonts.robotoBold();
 
-    await file.writeAsBytes(await pdf.save());
-    print("ends");
-  }
+    final font = isTamil ? tamilFont : englishFont;
+    final fontBold = isTamil ? tamilFontBold : englishFontBold;
 
-  Future<void> _generatePDFWithTable() async {
-    try {
-      final pdf = pw.Document();
+    pdf.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat(
+          80 * PdfPageFormat.mm,
+          double.infinity,
+          marginAll: 5 * PdfPageFormat.mm,
+        ),
+        build: (pw.Context context) {
+          return pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.center,
+            children: [
+              if (isTamil)
+                pw.Text(
+                  headerText,
+                  style: pw.TextStyle(font: font, fontSize: 10),
+                ),
+              pw.Text(
+                isTamil ? 'மதிப்பீட்டு ரசீது' : 'Receipt',
+                style: pw.TextStyle(font: fontBold, fontSize: 12),
+              ),
+              pw.Text(
+                isTamil ? shopNameTamil : shopNameEnglish,
+                style: pw.TextStyle(font: fontBold, fontSize: 14),
+              ),
+              pw.Text(
+                isTamil ? addressTamil : addressEnglish,
+                style: pw.TextStyle(font: font, fontSize: 10),
+              ),
+              pw.Text(
+                isTamil ? cityTamil : cityEnglish,
+                style: pw.TextStyle(font: font, fontSize: 10),
+              ),
+              pw.Text(
+                'Phone: $phone',
+                style: pw.TextStyle(font: font, fontSize: 10),
+              ),
+              pw.SizedBox(height: 5),
+              pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  pw.Text(
+                    'No: $receiptNumber',
+                    style: pw.TextStyle(font: font, fontSize: 10),
+                  ),
+                  pw.Text(
+                    DateFormat('hh:mm:ss a dd/MM/yyyy').format(DateTime.now()),
+                    style: pw.TextStyle(font: font, fontSize: 10),
+                  ),
+                ],
+              ),
+              pw.Divider(),
 
-      // Load Tamil font
-      final tamilFont = await PdfGoogleFonts.notoSansTamilRegular();
-      final tamilFontBold = await PdfGoogleFonts.notoSansTamilBold();
-
-      pdf.addPage(
-        pw.Page(
-          pageFormat: PdfPageFormat(
-            80 * PdfPageFormat.mm,
-            double.infinity,
-            marginAll: 5 * PdfPageFormat.mm,
-          ),
-          build: (pw.Context context) {
-            return pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.center,
-              children: [
-                // Header
-                pw.Text(
-                  'சேர்மன் சாமி துணை',
-                  style: pw.TextStyle(font: tamilFont, fontSize: 10),
-                ),
-                pw.Text(
-                  'மதிப்பீட்டு ரசீது',
-                  style: pw.TextStyle(font: tamilFontBold, fontSize: 12),
-                ),
-                pw.Text(
-                  shopName,
-                  style: pw.TextStyle(font: tamilFontBold, fontSize: 14),
-                ),
-                pw.Text(
-                  address,
-                  style: pw.TextStyle(font: tamilFont, fontSize: 10),
-                ),
-                pw.Text(
-                  city,
-                  style: pw.TextStyle(font: tamilFont, fontSize: 10),
-                ),
-                pw.Text(
-                  phone,
-                  style: pw.TextStyle(font: tamilFont, fontSize: 10),
-                ),
-                pw.SizedBox(height: 5),
-                pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Text(
-                      'No: $receiptNumber',
-                      style: pw.TextStyle(font: tamilFont, fontSize: 10),
+              // Table Header
+              pw.Row(
+                children: [
+                  pw.Container(width: 15, child: pw.Text('')),
+                  pw.Container(
+                    width: 105,
+                    child: pw.Text(
+                      tr('details'),
+                      style: pw.TextStyle(font: fontBold, fontSize: 10),
                     ),
-                    pw.Text(
-                      DateFormat(
-                        'hh:mm:ss a dd/MM/yyyy',
-                      ).format(DateTime.now()),
-                      style: pw.TextStyle(font: tamilFont, fontSize: 10),
+                  ),
+                  pw.Container(
+                    width: 40,
+                    child: pw.Text(
+                      tr('qty'),
+                      style: pw.TextStyle(font: fontBold, fontSize: 10),
+                      textAlign: pw.TextAlign.center,
                     ),
-                  ],
-                ),
-                pw.Divider(),
+                  ),
+                  pw.Container(
+                    width: 35,
+                    child: pw.Text(
+                      tr('rate'),
+                      style: pw.TextStyle(font: fontBold, fontSize: 10),
+                      textAlign: pw.TextAlign.right,
+                    ),
+                  ),
+                  pw.Container(
+                    width: 45,
+                    child: pw.Text(
+                      tr('amount'),
+                      style: pw.TextStyle(font: fontBold, fontSize: 10),
+                      textAlign: pw.TextAlign.right,
+                    ),
+                  ),
+                ],
+              ),
+              pw.Divider(),
 
-                // Table with items
-                pw.Table(
-                  columnWidths: {
-                    0: pw.FixedColumnWidth(15), // Serial number
-                    1: pw.FlexColumnWidth(3), // Product name
-                    2: pw.FixedColumnWidth(45), // Quantity
-                    3: pw.FixedColumnWidth(35), // Price
-                    4: pw.FixedColumnWidth(45), // Total
-                  },
-                  border: null,
-                  children: [
-                    // Header row
-                    pw.TableRow(
-                      children: [
-                        pw.Text(''),
-                        pw.Text(
-                          'விபரங்கள்',
-                          style: pw.TextStyle(
-                            font: tamilFontBold,
-                            fontSize: 10,
-                          ),
+              // Items
+              ...cartItems.asMap().entries.map((entry) {
+                final index = entry.key + 1;
+                final item = entry.value;
+
+                return pw.Padding(
+                  padding: pw.EdgeInsets.symmetric(vertical: 1),
+                  child: pw.Row(
+                    children: [
+                      pw.Container(
+                        width: 15,
+                        child: pw.Text(
+                          '$index',
+                          style: pw.TextStyle(font: font, fontSize: 9),
                         ),
-                        pw.Text(
-                          'அளவு',
-                          style: pw.TextStyle(
-                            font: tamilFontBold,
-                            fontSize: 10,
-                          ),
+                      ),
+                      pw.Container(
+                        width: 105,
+                        child: pw.Text(
+                          isTamil ? item.product.tamilName : item.product.name,
+                          style: pw.TextStyle(font: font, fontSize: 9),
+                        ),
+                      ),
+                      pw.Container(
+                        width: 40,
+                        child: pw.Text(
+                          '${item.quantity}${item.product.unit}',
+                          style: pw.TextStyle(font: font, fontSize: 9),
                           textAlign: pw.TextAlign.center,
                         ),
-                        pw.Text(
-                          'விலை',
-                          style: pw.TextStyle(
-                            font: tamilFontBold,
-                            fontSize: 10,
-                          ),
+                      ),
+                      pw.Container(
+                        width: 35,
+                        child: pw.Text(
+                          item.product.price.toStringAsFixed(2),
+                          style: pw.TextStyle(font: font, fontSize: 9),
                           textAlign: pw.TextAlign.right,
                         ),
-                        pw.Text(
-                          'தொகை',
-                          style: pw.TextStyle(
-                            font: tamilFontBold,
-                            fontSize: 10,
-                          ),
+                      ),
+                      pw.Container(
+                        width: 45,
+                        child: pw.Text(
+                          item.total.toStringAsFixed(2),
+                          style: pw.TextStyle(font: font, fontSize: 9),
                           textAlign: pw.TextAlign.right,
                         ),
-                      ],
-                    ),
-                    // Divider row
-                    pw.TableRow(
-                      children: [
-                        pw.Divider(),
-                        pw.Divider(),
-                        pw.Divider(),
-                        pw.Divider(),
-                        pw.Divider(),
-                      ],
-                    ),
-                    // Item rows
-                    ...cartItems.asMap().entries.map((entry) {
-                      final index = entry.key + 1;
-                      final item = entry.value;
-
-                      return pw.TableRow(
-                        children: [
-                          pw.Text(
-                            '$index',
-                            style: pw.TextStyle(font: tamilFont, fontSize: 9),
-                          ),
-                          pw.Text(
-                            item.product.tamilName,
-                            style: pw.TextStyle(font: tamilFont, fontSize: 9),
-                          ),
-                          pw.Text(
-                            '${item.quantity}${item.product.unit}',
-                            style: pw.TextStyle(font: tamilFont, fontSize: 9),
-                            textAlign: pw.TextAlign.center,
-                          ),
-                          pw.Text(
-                            item.product.price.toStringAsFixed(2),
-                            style: pw.TextStyle(font: tamilFont, fontSize: 9),
-                            textAlign: pw.TextAlign.right,
-                          ),
-                          pw.Text(
-                            item.total.toStringAsFixed(2),
-                            style: pw.TextStyle(font: tamilFont, fontSize: 9),
-                            textAlign: pw.TextAlign.right,
-                          ),
-                        ],
-                      );
-                    }).toList(),
-                  ],
-                ),
-
-                pw.Divider(),
-
-                // Total
-                pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.end,
-                  children: [
-                    pw.Text(
-                      'மொத்தம்   ',
-                      style: pw.TextStyle(font: tamilFontBold, fontSize: 11),
-                    ),
-                    pw.Container(
-                      width: 50,
-                      child: pw.Text(
-                        totalAmount.toStringAsFixed(2),
-                        style: pw.TextStyle(font: tamilFontBold, fontSize: 11),
-                        textAlign: pw.TextAlign.right,
                       ),
+                    ],
+                  ),
+                );
+              }),
+
+              pw.Divider(),
+
+              // Total
+              pw.Row(
+                children: [
+                  pw.Container(
+                    width: 195,
+                    child: pw.Text(
+                      tr('total'),
+                      style: pw.TextStyle(font: fontBold, fontSize: 11),
+                      textAlign: pw.TextAlign.right,
                     ),
-                  ],
-                ),
-
-                pw.SizedBox(height: 10),
-                pw.Text(
-                  'நன்றி',
-                  style: pw.TextStyle(font: tamilFont, fontSize: 10),
-                ),
-                pw.Text(
-                  'மீண்டும் வாருங்கள்',
-                  style: pw.TextStyle(font: tamilFont, fontSize: 10),
-                ),
-              ],
-            );
-          },
-        ),
-      );
-
-      await Printing.layoutPdf(
-        onLayout: (PdfPageFormat format) async => pdf.save(),
-      );
-
-      // Rest of the code remains the same...
-    } catch (e) {
-      print('Error generating PDF: $e');
-    }
-  }
-
-  Future<void> _generatePDFNew() async {
-    try {
-      final pdf = pw.Document();
-
-      // Load Tamil font
-      final tamilFont = await PdfGoogleFonts.notoSansTamilRegular();
-      final tamilFontBold = await PdfGoogleFonts.notoSansTamilBold();
-
-      pdf.addPage(
-        pw.Page(
-          pageFormat: PdfPageFormat(
-            80 * PdfPageFormat.mm,
-            double.infinity,
-            marginAll: 5 * PdfPageFormat.mm,
-          ),
-          build: (pw.Context context) {
-            return pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.center,
-              children: [
-                // Header
-                pw.Text(
-                  'சேர்மன் சாமி துணை',
-                  style: pw.TextStyle(font: tamilFont, fontSize: 10),
-                ),
-                pw.Text(
-                  'மதிப்பீட்டு ரசீது',
-                  style: pw.TextStyle(font: tamilFontBold, fontSize: 12),
-                ),
-                pw.Text(
-                  shopName,
-                  style: pw.TextStyle(font: tamilFontBold, fontSize: 14),
-                ),
-                pw.Text(
-                  address,
-                  style: pw.TextStyle(font: tamilFont, fontSize: 10),
-                ),
-                pw.Text(
-                  city,
-                  style: pw.TextStyle(font: tamilFont, fontSize: 10),
-                ),
-                pw.Text(
-                  phone,
-                  style: pw.TextStyle(font: tamilFont, fontSize: 10),
-                ),
-                pw.SizedBox(height: 5),
-                pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Text(
-                      'No: $receiptNumber',
-                      style: pw.TextStyle(font: tamilFont, fontSize: 10),
-                    ),
-                    pw.Text(
-                      DateFormat(
-                        'hh:mm:ss a dd/MM/yyyy',
-                      ).format(DateTime.now()),
-                      style: pw.TextStyle(font: tamilFont, fontSize: 10),
-                    ),
-                  ],
-                ),
-                pw.Divider(),
-
-                // Table Header
-                pw.Row(
-                  children: [
-                    pw.Container(
-                      width: 120,
-                      child: pw.Text(
-                        'விபரங்கள்',
-                        style: pw.TextStyle(font: tamilFontBold, fontSize: 10),
-                      ),
-                    ),
-                    pw.Container(
-                      width: 35,
-                      child: pw.Text(
-                        'அளவு',
-                        style: pw.TextStyle(font: tamilFontBold, fontSize: 10),
-                        textAlign: pw.TextAlign.center,
-                      ),
-                    ),
-                    pw.Container(
-                      width: 35,
-                      child: pw.Text(
-                        'விலை',
-                        style: pw.TextStyle(font: tamilFontBold, fontSize: 10),
-                        textAlign: pw.TextAlign.right,
-                      ),
-                    ),
-                    pw.Container(
-                      width: 45,
-                      child: pw.Text(
-                        'தொகை',
-                        style: pw.TextStyle(font: tamilFontBold, fontSize: 10),
-                        textAlign: pw.TextAlign.right,
-                      ),
-                    ),
-                  ],
-                ),
-                pw.Divider(),
-
-                // Items with serial numbers
-                ...cartItems.asMap().entries.map((entry) {
-                  final index = entry.key + 1;
-                  final item = entry.value;
-
-                  // Format quantity with unit properly
-                  String quantityText = '';
-                  if (item.product.unit == 'கிலோ' ||
-                      item.product.unit == 'லிட்டர்') {
-                    // For weight/volume items, show as decimal
-                    quantityText =
-                        '${item.quantity.toStringAsFixed(3)}${item.product.unit}';
-                  } else if (item.product.unit == 'எண்' ||
-                      item.product.unit == 'பாக்கெட்') {
-                    // For countable items, show as integer if whole number
-                    if (item.quantity == item.quantity.toInt()) {
-                      quantityText =
-                          '${item.quantity.toInt()}${item.product.unit}';
-                    } else {
-                      quantityText =
-                          '${item.quantity.toStringAsFixed(1)}${item.product.unit}';
-                    }
-                  } else {
-                    quantityText =
-                        '${item.quantity.toStringAsFixed(1)}${item.product.unit}';
-                  }
-
-                  return pw.Padding(
-                    padding: pw.EdgeInsets.symmetric(vertical: 1),
-                    child: pw.Row(
-                      children: [
-                        // Product name with serial number
-                        pw.Container(
-                          width: 120,
-                          child: pw.Row(
-                            children: [
-                              pw.Container(
-                                width: 15,
-                                child: pw.Text(
-                                  '$index',
-                                  style: pw.TextStyle(
-                                    font: tamilFont,
-                                    fontSize: 9,
-                                  ),
-                                ),
-                              ),
-                              pw.Expanded(
-                                child: pw.Text(
-                                  item.product.tamilName,
-                                  style: pw.TextStyle(
-                                    font: tamilFont,
-                                    fontSize: 9,
-                                  ),
-                                  maxLines: 1,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        // Quantity
-                        pw.Container(
-                          width: 35,
-                          child: pw.Text(
-                            quantityText,
-                            style: pw.TextStyle(font: tamilFont, fontSize: 9),
-                            textAlign: pw.TextAlign.center,
-                          ),
-                        ),
-                        // Price
-                        pw.Container(
-                          width: 35,
-                          child: pw.Text(
-                            item.product.price.toStringAsFixed(2),
-                            style: pw.TextStyle(font: tamilFont, fontSize: 9),
-                            textAlign: pw.TextAlign.right,
-                          ),
-                        ),
-                        // Total
-                        pw.Container(
-                          width: 45,
-                          child: pw.Text(
-                            item.total.toStringAsFixed(2),
-                            style: pw.TextStyle(font: tamilFont, fontSize: 9),
-                            textAlign: pw.TextAlign.right,
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                }),
-
-                pw.Divider(),
-
-                // Total
-                pw.Row(
-                  children: [
-                    pw.Container(
-                      width: 190,
-                      child: pw.Text(
-                        'மொத்தம்',
-                        style: pw.TextStyle(font: tamilFontBold, fontSize: 11),
-                        textAlign: pw.TextAlign.right,
-                      ),
-                    ),
-                    pw.Container(
-                      width: 45,
-                      child: pw.Text(
-                        totalAmount.toStringAsFixed(2),
-                        style: pw.TextStyle(font: tamilFontBold, fontSize: 11),
-                        textAlign: pw.TextAlign.right,
-                      ),
-                    ),
-                  ],
-                ),
-
-                pw.SizedBox(height: 10),
-                pw.Text(
-                  'நன்றி',
-                  style: pw.TextStyle(font: tamilFont, fontSize: 10),
-                ),
-                pw.Text(
-                  'மீண்டும் வாருங்கள்',
-                  style: pw.TextStyle(font: tamilFont, fontSize: 10),
-                ),
-
-                // Optional: Add footer with shop details
-                pw.SizedBox(height: 10),
-                pw.Divider(),
-                pw.Text(
-                  '★பொருட்களை சரிபார்த்து எடுத்துக்கொள்ளவும்★',
-                  style: pw.TextStyle(font: tamilFont, fontSize: 8),
-                ),
-                pw.Text(
-                  'கூகுள்பேயும்பார் 8925463455',
-                  style: pw.TextStyle(font: tamilFont, fontSize: 8),
-                ),
-                pw.Text(
-                  '24 முதல்29விடுமுறை',
-                  style: pw.TextStyle(font: tamilFont, fontSize: 8),
-                ),
-              ],
-            );
-          },
-        ),
-      );
-
-      await Printing.layoutPdf(
-        onLayout: (PdfPageFormat format) async => pdf.save(),
-      );
-
-      // Save receipt to local database
-      await _saveReceiptToLocal();
-
-      // Try to sync with Firestore if online
-      if (isOnline) {
-        await _saveReceiptToFirestore();
-      }
-
-      // Increment receipt number for next receipt
-      await _incrementReceiptNumber();
-
-      // Clear cart after printing
-      _clearCart();
-    } catch (e) {
-      print('Error generating PDF: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('PDF உருவாக்குவதில் பிழை: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
-
-  Future<void> _generatePDF() async {
-    try {
-      final pdf = pw.Document();
-
-      // Load Tamil font
-      final tamilFont = await fontFromAssetBundle(
-        'assets/fonts/NotoSansTamil-Regular.ttf',
-      );
-
-      // final tamilFont = await PdfGoogleFonts.germaniaOneRegular();
-
-      final tamilFontBold = await fontFromAssetBundle(
-        'assets/fonts/NotoSansTamil-Bold.ttf',
-      );
-
-      print('Tamil Font Loaded: $tamilFont');
-      print('Tamil Bold Font Loaded: $tamilFontBold');
-      print(
-        'Cart Items for PDF: ${cartItems.map((item) => item.product.tamilName).toList()}',
-      );
-      pdf.addPage(
-        pw.Page(
-          pageFormat: PdfPageFormat(
-            80 * PdfPageFormat.mm,
-            double.infinity,
-            marginAll: 5 * PdfPageFormat.mm,
-          ),
-          build: (pw.Context context) {
-            return pw.Column(
-              crossAxisAlignment: pw.CrossAxisAlignment.center,
-              children: [
-                // Header
-                pw.Text(
-                  //'சேர்மன் சாமி துணை',
-                  '"\u0BA4\u0BC1"',
-                  //'"\u0B85"',
-                  style: pw.TextStyle(font: tamilFont, fontSize: 10),
-                ),
-
-                pw.Text(
-                  'மதிப்பீட்டு ரசீது',
-                  style: pw.TextStyle(font: tamilFontBold, fontSize: 12),
-                ),
-                pw.Text(
-                  shopName,
-                  style: pw.TextStyle(font: tamilFontBold, fontSize: 14),
-                ),
-                pw.Text(
-                  address,
-                  style: pw.TextStyle(font: tamilFont, fontSize: 10),
-                ),
-                pw.Text(
-                  city,
-                  style: pw.TextStyle(font: tamilFont, fontSize: 10),
-                ),
-                pw.Text(
-                  phone,
-                  style: pw.TextStyle(font: tamilFont, fontSize: 10),
-                ),
-                pw.SizedBox(height: 5),
-                pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Text(
-                      'No: $receiptNumber',
-                      style: pw.TextStyle(font: tamilFont, fontSize: 10),
-                    ),
-                    pw.Text(
-                      DateFormat(
-                        'hh:mm:ss a dd/MM/yyyy',
-                      ).format(DateTime.now()),
-                      style: pw.TextStyle(font: tamilFont, fontSize: 10),
-                    ),
-                  ],
-                ),
-                pw.Divider(),
-
-                // Table Header
-                pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Expanded(
-                      flex: 3,
-                      child: pw.Text(
-                        'விபரங்கள்',
-                        style: pw.TextStyle(font: tamilFontBold, fontSize: 10),
-                      ),
-                    ),
-                    pw.Expanded(
-                      child: pw.Text(
-                        'அளவு',
-                        style: pw.TextStyle(font: tamilFontBold, fontSize: 10),
-                        textAlign: pw.TextAlign.center,
-                      ),
-                    ),
-                    pw.Expanded(
-                      child: pw.Text(
-                        'விலை',
-                        style: pw.TextStyle(font: tamilFontBold, fontSize: 10),
-                        textAlign: pw.TextAlign.center,
-                      ),
-                    ),
-                    pw.Expanded(
-                      child: pw.Text(
-                        'தொகை',
-                        style: pw.TextStyle(font: tamilFontBold, fontSize: 10),
-                        textAlign: pw.TextAlign.right,
-                      ),
-                    ),
-                  ],
-                ),
-                pw.Divider(),
-
-                // Items
-                ...cartItems.asMap().entries.map((entry) {
-                  final item = entry.value;
-                  return pw.Padding(
-                    padding: pw.EdgeInsets.symmetric(vertical: 2),
-                    child: pw.Row(
-                      mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                      children: [
-                        pw.Expanded(
-                          flex: 3,
-                          child: pw.Text(
-                            '${item.product.tamilName}',
-                            style: pw.TextStyle(font: tamilFont, fontSize: 10),
-                          ),
-                        ),
-                        pw.Expanded(
-                          child: pw.Text(
-                            '${item.quantity}${item.product.unit}',
-                            style: pw.TextStyle(font: tamilFont, fontSize: 10),
-                            textAlign: pw.TextAlign.center,
-                          ),
-                        ),
-                        pw.Expanded(
-                          child: pw.Text(
-                            item.product.price.toStringAsFixed(2),
-                            style: pw.TextStyle(font: tamilFont, fontSize: 10),
-                            textAlign: pw.TextAlign.center,
-                          ),
-                        ),
-                        pw.Expanded(
-                          child: pw.Text(
-                            item.total.toStringAsFixed(2),
-                            style: pw.TextStyle(font: tamilFont, fontSize: 10),
-                            textAlign: pw.TextAlign.right,
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                }),
-
-                pw.Divider(),
-
-                // Total
-                pw.Row(
-                  mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                  children: [
-                    pw.Text(
-                      'மொத்தம்',
-                      style: pw.TextStyle(font: tamilFontBold, fontSize: 12),
-                    ),
-                    pw.Text(
+                  ),
+                  pw.Container(
+                    width: 45,
+                    child: pw.Text(
                       totalAmount.toStringAsFixed(2),
-                      style: pw.TextStyle(font: tamilFontBold, fontSize: 12),
+                      style: pw.TextStyle(font: fontBold, fontSize: 11),
+                      textAlign: pw.TextAlign.right,
                     ),
-                  ],
-                ),
+                  ),
+                ],
+              ),
 
+              pw.SizedBox(height: 10),
+              pw.Text(
+                tr('thanks'),
+                style: pw.TextStyle(font: font, fontSize: 10),
+              ),
+              pw.Text(
+                tr('visitAgain'),
+                style: pw.TextStyle(font: font, fontSize: 10),
+              ),
+
+              if (isTamil) ...[
                 pw.SizedBox(height: 10),
+                pw.Divider(),
                 pw.Text(
-                  'நன்றி',
-                  style: pw.TextStyle(font: tamilFont, fontSize: 10),
+                  footerText1,
+                  style: pw.TextStyle(font: font, fontSize: 8),
                 ),
                 pw.Text(
-                  'மீண்டும் வாருங்கள்',
-                  style: pw.TextStyle(font: tamilFont, fontSize: 10),
+                  footerText2,
+                  style: pw.TextStyle(font: font, fontSize: 8),
+                ),
+                pw.Text(
+                  footerText3,
+                  style: pw.TextStyle(font: font, fontSize: 8),
                 ),
               ],
-            );
-          },
-        ),
-      );
+            ],
+          );
+        },
+      ),
+    );
 
-      await Printing.layoutPdf(
-        onLayout: (PdfPageFormat format) async => pdf.save(),
-      );
-
-      // Save receipt to local database
-      await _saveReceiptToLocal();
-
-      //save in mobiledevice
-
-      await _saveReceiptInMobile();
-
-      // Try to sync with Firestore if online
-      if (isOnline) {
-        await _saveReceiptToFirestore();
-      }
-
-      // Increment receipt number for next receipt
-      await _incrementReceiptNumber();
-
-      // Clear cart after printing
-      _clearCart();
-    } catch (e) {
-      print('Error generating PDF: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('PDF உருவாக்குவதில் பிழை: $e'),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
+    return pdf.save(); // This returns Future<Uint8List>
   }
 
   Future<void> _saveReceiptToLocal() async {
@@ -1370,41 +936,13 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
               .toList(),
         ),
         'totalAmount': totalAmount,
-        'shopName': shopName,
+        'shopName': isTamil ? shopNameTamil : shopNameEnglish,
         'isSynced': isOnline ? 1 : 0,
       };
 
       await _dbHelper.insertReceipt(receiptData);
-      print('Receipt saved locally');
     } catch (e) {
       print('Error saving receipt locally: $e');
-    }
-  }
-
-  Future<void> _saveReceiptToFirestore() async {
-    if (!isOnline) return;
-
-    try {
-      await _firestore.collection('receipts').add({
-        'receiptNumber': receiptNumber,
-        'timestamp': FieldValue.serverTimestamp(),
-        'items': cartItems
-            .map(
-              (item) => {
-                'productId': item.product.id,
-                'productName': item.product.tamilName,
-                'quantity': item.quantity,
-                'price': item.product.price,
-                'total': item.total,
-              },
-            )
-            .toList(),
-        'totalAmount': totalAmount,
-        'shopName': shopName,
-      });
-      print('Receipt saved to Firestore');
-    } catch (e) {
-      print('Error saving receipt to Firestore: $e');
     }
   }
 
@@ -1547,22 +1085,63 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                           ],
                         ),
                         SizedBox(height: 10),
-                        ElevatedButton.icon(
-                          onPressed: cartItems.isEmpty
-                              ? null
-                              : () {
-                                  Navigator.pop(
-                                    context,
-                                  ); // Close bottom sheet before generating PDF
-                                  _generatePDFWithTable();
-                                },
-                          icon: Icon(Icons.print),
-                          label: Text(tr('printReceipt')),
-                          style: ElevatedButton.styleFrom(
-                            minimumSize: Size(double.infinity, 50),
-                            backgroundColor: Colors.green,
-                          ),
+
+                        Row(
+                          children: [
+                            Expanded(
+                              child: ElevatedButton.icon(
+                                onPressed: cartItems.isEmpty
+                                    ? null
+                                    : () => _generateAndActionPDF('print'),
+                                icon: Icon(Icons.print),
+                                label: Text(tr('printReceipt')),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.green,
+                                ),
+                              ),
+                            ),
+                            SizedBox(width: 8),
+                            IconButton(
+                              onPressed: cartItems.isEmpty
+                                  ? null
+                                  : () => _generateAndActionPDF('save'),
+                              icon: Icon(Icons.download),
+                              tooltip: tr('saveReceipt'),
+                              style: IconButton.styleFrom(
+                                backgroundColor: Colors.blue,
+                                foregroundColor: Colors.white,
+                              ),
+                            ),
+                            SizedBox(width: 8),
+                            IconButton(
+                              onPressed: cartItems.isEmpty
+                                  ? null
+                                  : () => _generateAndActionPDF('share'),
+                              icon: Icon(Icons.share),
+                              tooltip: tr('shareReceipt'),
+                              style: IconButton.styleFrom(
+                                backgroundColor: Colors.orange,
+                                foregroundColor: Colors.white,
+                              ),
+                            ),
+                          ],
                         ),
+                        // ElevatedButton.icon(
+                        //   onPressed: cartItems.isEmpty
+                        //       ? null
+                        //       : () {
+                        //           Navigator.pop(
+                        //             context,
+                        //           ); // Close bottom sheet before generating PDF
+                        //           // _generatePDFWithTable();
+                        //         },
+                        //   icon: Icon(Icons.print),
+                        //   label: Text(tr('printReceipt')),
+                        //   style: ElevatedButton.styleFrom(
+                        //     minimumSize: Size(double.infinity, 50),
+                        //     backgroundColor: Colors.green,
+                        //   ),
+                        // ),
                       ],
                     ),
                   ),
@@ -1575,9 +1154,43 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     );
   }
 
+  Future<void> _saveReceiptToFirestore() async {
+    if (!isOnline) return;
+
+    try {
+      await _firestore.collection('receipts').add({
+        'receiptNumber': receiptNumber,
+        'timestamp': FieldValue.serverTimestamp(),
+        'items': cartItems
+            .map(
+              (item) => {
+                'productId': item.product.id,
+                'productName': item.product.tamilName,
+                'quantity': item.quantity,
+                'price': item.product.price,
+                'total': item.total,
+              },
+            )
+            .toList(),
+        'totalAmount': totalAmount,
+        'shopName': isTamil ? shopNameTamil : shopNameEnglish,
+        'language': isTamil ? 'ta' : 'en',
+      });
+    } catch (e) {
+      print('Error saving receipt to Firestore: $e');
+    }
+  }
+
+  @override
+  void dispose() {
+    _productsListener?.cancel();
+    _shopDetailsListener?.cancel();
+    _searchController.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Show error screen if there's a critical error
     if (errorMessage != null && allProducts.isEmpty) {
       return Scaffold(
         appBar: AppBar(title: Text(tr('title'))),
@@ -1612,15 +1225,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
       appBar: AppBar(
         title: Row(
           children: [
-            Expanded(
-              child: FittedBox(
-                child: Text(
-                  tr('title'),
-                  style: TextStyle(fontSize: 22), // Adjust font size if needed
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ),
+            Expanded(child: FittedBox(child: Text(tr('title')))),
             SizedBox(width: 10),
             Container(
               padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -1681,7 +1286,6 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
             onPressed: _showCartBottomSheet,
             tooltip: tr('cart'),
           ),
-          // Language toggle button
           IconButton(
             icon: Container(
               padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -1701,7 +1305,6 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
       ),
       body: Column(
         children: [
-          // Sync Status Bar
           if (lastSync != null)
             Container(
               padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -1718,32 +1321,45 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
               ),
             ),
 
-          // Search Section
+          // Search Section with count
           Container(
             padding: EdgeInsets.all(8.0),
-            child: TextField(
-              controller: _searchController,
-              decoration: InputDecoration(
-                labelText: tr('searchProduct'),
-                hintText: tr('searchHint'),
-                prefixIcon: Icon(Icons.search),
-                border: OutlineInputBorder(),
-                suffixIcon: _searchController.text.isNotEmpty
-                    ? IconButton(
-                        icon: Icon(Icons.clear),
-                        onPressed: () {
-                          _searchController.clear();
-                          _filterProducts('');
-                        },
-                      )
-                    : null,
-              ),
-              onChanged: _filterProducts,
+            child: Column(
+              children: [
+                TextField(
+                  controller: _searchController,
+                  decoration: InputDecoration(
+                    labelText: tr('searchProduct'),
+                    hintText: tr('searchHint'),
+                    prefixIcon: Icon(Icons.search),
+                    border: OutlineInputBorder(),
+                    suffixIcon: _searchController.text.isNotEmpty
+                        ? IconButton(
+                            icon: Icon(Icons.clear),
+                            onPressed: () {
+                              _searchController.clear();
+                              _filterProducts('');
+                            },
+                          )
+                        : null,
+                  ),
+                  onChanged: _filterProducts,
+                ),
+                if (isSearching && filteredProducts.isNotEmpty)
+                  Padding(
+                    padding: EdgeInsets.only(top: 8),
+                    child: Text(
+                      '${filteredProducts.length} ${tr("productsFound")}',
+                      style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                    ),
+                  ),
+              ],
             ),
           ),
 
-          // Products Grid / Search Instructions
+          // Products Grid
           Expanded(
+            flex: 3,
             child: isLoading
                 ? Center(child: CircularProgressIndicator())
                 : !isSearching
@@ -1760,6 +1376,20 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                             color: Colors.grey[600],
                           ),
                         ),
+                        SizedBox(height: 16),
+                        // OutlinedButton.icon(
+                        //   onPressed: () {
+                        //     Navigator.push(
+                        //       context,
+                        //       MaterialPageRoute(
+                        //         builder: (context) =>
+                        //             AddProductScreen(isOnline: isOnline),
+                        //       ),
+                        //     ).then((_) => _loadLocalData());
+                        //   },
+                        //   icon: Icon(Icons.add),
+                        //   label: Text(tr('addProduct')),
+                        // ),
                       ],
                     ),
                   )
@@ -1770,18 +1400,6 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                       children: [
                         Icon(Icons.inventory_2, size: 64, color: Colors.grey),
                         Text(tr('noProducts')),
-                        TextButton(
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (context) =>
-                                    AddProductScreen(isOnline: isOnline),
-                              ),
-                            ).then((_) => _loadLocalData());
-                          },
-                          child: Text(tr('addProduct')),
-                        ),
                       ],
                     ),
                   )
@@ -1796,8 +1414,11 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                     itemCount: filteredProducts.length,
                     itemBuilder: (context, index) {
                       final product = filteredProducts[index];
+                      final inCart = _isProductInCart(product.id);
+
                       return Card(
                         elevation: 2,
+                        color: inCart ? Colors.green[50] : null,
                         child: InkWell(
                           onTap: () => _showQuantityDialog(product),
                           child: Stack(
@@ -1841,10 +1462,27 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                                   ],
                                 ),
                               ),
-                              if (product.isLocal)
+                              if (inCart)
                                 Positioned(
                                   top: 4,
                                   right: 4,
+                                  child: Container(
+                                    padding: EdgeInsets.all(2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.green,
+                                      shape: BoxShape.circle,
+                                    ),
+                                    child: Icon(
+                                      Icons.check,
+                                      size: 16,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                ),
+                              if (product.isLocal)
+                                Positioned(
+                                  top: 4,
+                                  left: 4,
                                   child: Container(
                                     padding: EdgeInsets.all(2),
                                     decoration: BoxDecoration(
@@ -1865,14 +1503,175 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                     },
                   ),
           ),
+
+          // Divider(thickness: 2),
+
+          // Cart Section
+          // Expanded(
+          //   flex: 2,
+          //   child: Column(
+          //     children: [
+          //       Padding(
+          //         padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          //         child: Row(
+          //           mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          //           children: [
+          //             Text(
+          //               '${tr("cart")} (${cartItems.length})',
+          //               style: TextStyle(
+          //                 fontSize: 16,
+          //                 fontWeight: FontWeight.bold,
+          //               ),
+          //             ),
+          //             if (cartItems.isNotEmpty)
+          //               TextButton(
+          //                 onPressed: _clearCart,
+          //                 child: Text(
+          //                   tr('clear'),
+          //                   style: TextStyle(color: Colors.red),
+          //                 ),
+          //               ),
+          //           ],
+          //         ),
+          //       ),
+          //       Expanded(
+          //         child: cartItems.isEmpty
+          //             ? Center(child: Text(tr('emptyCart')))
+          //             : ListView.builder(
+          //                 itemCount: cartItems.length,
+          //                 itemBuilder: (context, index) {
+          //                   final item = cartItems[index];
+          //                   return ListTile(
+          //                     title: Text(
+          //                       isTamil
+          //                           ? item.product.tamilName
+          //                           : item.product.name,
+          //                     ),
+          //                     subtitle: Text(
+          //                       '₹${item.product.price} × ${item.quantity}${item.product.unit}',
+          //                     ),
+          //                     trailing: Row(
+          //                       mainAxisSize: MainAxisSize.min,
+          //                       children: [
+          //                         Text(
+          //                           '₹${item.total.toStringAsFixed(2)}',
+          //                           style: TextStyle(
+          //                             fontWeight: FontWeight.bold,
+          //                           ),
+          //                         ),
+          //                         IconButton(
+          //                           icon: Icon(
+          //                             Icons.remove_circle,
+          //                             color: item.quantity == 1
+          //                                 ? Colors.grey
+          //                                 : Colors.orange,
+          //                           ),
+          //                           onPressed: item.quantity == 1
+          //                               ? null
+          //                               : () => _updateQuantity(
+          //                                   index,
+          //                                   item.quantity - 1,
+          //                                 ),
+          //                         ),
+          //                         IconButton(
+          //                           icon: Icon(
+          //                             Icons.add_circle,
+          //                             color: Colors.green,
+          //                           ),
+          //                           onPressed: () => _updateQuantity(
+          //                             index,
+          //                             item.quantity + 1,
+          //                           ),
+          //                         ),
+          //                         IconButton(
+          //                           icon: Icon(Icons.delete, color: Colors.red),
+          //                           onPressed: () => _removeFromCart(index),
+          //                         ),
+          //                       ],
+          //                     ),
+          //                   );
+          //                 },
+          //               ),
+          //       ),
+          //       Container(
+          //         padding: EdgeInsets.all(16),
+          //         decoration: BoxDecoration(
+          //           color: Colors.grey[200],
+          //           borderRadius: BorderRadius.only(
+          //             topLeft: Radius.circular(16),
+          //             topRight: Radius.circular(16),
+          //           ),
+          //         ),
+          //         child: Column(
+          //           children: [
+          //             Row(
+          //               mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          //               children: [
+          //                 Text(
+          //                   '${tr("total")}:',
+          //                   style: TextStyle(
+          //                     fontSize: 20,
+          //                     fontWeight: FontWeight.bold,
+          //                   ),
+          //                 ),
+          //                 Text(
+          //                   '₹${totalAmount.toStringAsFixed(2)}',
+          //                   style: TextStyle(
+          //                     fontSize: 20,
+          //                     fontWeight: FontWeight.bold,
+          //                   ),
+          //                 ),
+          //               ],
+          //             ),
+          //             SizedBox(height: 10),
+          //             Row(
+          //               children: [
+          //                 Expanded(
+          //                   child: ElevatedButton.icon(
+          //                     onPressed: cartItems.isEmpty
+          //                         ? null
+          //                         : () => _generateAndActionPDF('print'),
+          //                     icon: Icon(Icons.print),
+          //                     label: Text(tr('printReceipt')),
+          //                     style: ElevatedButton.styleFrom(
+          //                       backgroundColor: Colors.green,
+          //                     ),
+          //                   ),
+          //                 ),
+          //                 SizedBox(width: 8),
+          //                 IconButton(
+          //                   onPressed: cartItems.isEmpty
+          //                       ? null
+          //                       : () => _generateAndActionPDF('save'),
+          //                   icon: Icon(Icons.download),
+          //                   tooltip: tr('saveReceipt'),
+          //                   style: IconButton.styleFrom(
+          //                     backgroundColor: Colors.blue,
+          //                     foregroundColor: Colors.white,
+          //                   ),
+          //                 ),
+          //                 SizedBox(width: 8),
+          //                 IconButton(
+          //                   onPressed: cartItems.isEmpty
+          //                       ? null
+          //                       : () => _generateAndActionPDF('share'),
+          //                   icon: Icon(Icons.share),
+          //                   tooltip: tr('shareReceipt'),
+          //                   style: IconButton.styleFrom(
+          //                     backgroundColor: Colors.orange,
+          //                     foregroundColor: Colors.white,
+          //                   ),
+          //                 ),
+          //               ],
+          //             ),
+          //           ],
+          //         ),
+          //       ),
+          //     ],
+          //   ),
+          // ),
         ],
       ),
     );
-  }
-
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
   }
 }

@@ -117,7 +117,7 @@ class MainActivity: FlutterActivity() {
 
         val normalPaint = Paint().apply {
             color = Color.BLACK
-            textSize = 11f
+            textSize = 12f  // Increased from 11f to prevent shrinking
             textAlign = Paint.Align.CENTER
             letterSpacing = 0.05f
         }
@@ -131,7 +131,7 @@ class MainActivity: FlutterActivity() {
 
         val centerPaint = Paint().apply {
             color = Color.BLACK
-            textSize = 11f
+            textSize = 12f  // Increased from 11f to prevent shrinking
             textAlign = Paint.Align.CENTER
             letterSpacing = 0.05f
         }
@@ -217,19 +217,19 @@ class MainActivity: FlutterActivity() {
             textAlign = Paint.Align.LEFT
         }
 
-        // Precise column positions for 80mm thermal paper (226 points width)
+        // Fixed column positions for 80mm thermal paper (226 points width) - preventing overlap
         val col1 = margin + 2f   // S.No
-        val col2 = margin + 18f  // Details  
-        val col3 = margin + 110f // Qty
-        val col4 = margin + 150f // Rate
-        val col5 = margin + 190f // Amount
+        val col2 = margin + 25f  // Details - moved right to prevent overlap with S.No
+        val col3 = margin + 115f // Qty - slightly adjusted
+        val col4 = margin + 145f // Rate - moved left to give more space for amount
+        val col5 = margin + 180f // Amount - moved left to ensure visibility
 
         canvas.drawText("S.No", col1, yPosition, headerBoldPaint)
         canvas.drawText(if (language == "ta") "விபரங்கள்" else "Details", col2, yPosition, headerBoldPaint)
         
         val qtyHeaderPaint = Paint().apply {
             color = Color.BLACK
-            textSize = 9f
+            textSize = 10f  // Increased from 9f to prevent shrinking
             isFakeBoldText = true
             textAlign = Paint.Align.LEFT
         }
@@ -237,7 +237,7 @@ class MainActivity: FlutterActivity() {
         
         val rateHeaderPaint = Paint().apply {
             color = Color.BLACK
-            textSize = 9f
+            textSize = 10f  // Increased from 9f to prevent shrinking
             isFakeBoldText = true
             textAlign = Paint.Align.LEFT
         }
@@ -245,7 +245,7 @@ class MainActivity: FlutterActivity() {
         
         val amountHeaderPaint = Paint().apply {
             color = Color.BLACK
-            textSize = 9f
+            textSize = 10f  // Increased from 9f to prevent shrinking (fixes தொகை shrinking)
             isFakeBoldText = true
             textAlign = Paint.Align.LEFT
         }
@@ -298,7 +298,8 @@ class MainActivity: FlutterActivity() {
             // Draw items with fixed positions
             canvas.drawText("${index + 1}", col1, yPosition, itemPaint)
             canvas.drawText(truncatedName, col2, yPosition, itemPaint)
-            canvas.drawText("$quantity$unit", col3, yPosition, qtyPaint)
+            // Show only numbers in quantity column (removed unit)
+            canvas.drawText(String.format("%.0f", quantity), col3, yPosition, qtyPaint)
             canvas.drawText(String.format("%.2f", price), col4, yPosition, pricePaint)
             canvas.drawText(String.format("%.2f", total), col5, yPosition, totalPaint)
             yPosition += 13f
@@ -308,22 +309,23 @@ class MainActivity: FlutterActivity() {
         canvas.drawLine(margin, yPosition, pageWidth - margin, yPosition, linePaint)
         yPosition += 12f
 
-        // Total with proper alignment
+        // Total with proper left alignment and better visibility
         val totalLabelPaint = Paint().apply {
             color = Color.BLACK
-            textSize = 11f
+            textSize = 12f  // Increased size for better visibility
             isFakeBoldText = true
             textAlign = Paint.Align.LEFT
         }
 
         val totalAmountPaint = Paint().apply {
             color = Color.BLACK
-            textSize = 11f
+            textSize = 12f  // Increased size for better visibility
             isFakeBoldText = true
             textAlign = Paint.Align.LEFT
         }
 
-        canvas.drawText(if (language == "ta") "மொத்தம்:" else "Total:", col4, yPosition, totalLabelPaint)
+        // Left align the total text properly
+        canvas.drawText(if (language == "ta") "மொத்தம்:" else "Total:", margin + 120f, yPosition, totalLabelPaint)
         canvas.drawText(String.format("%.2f", totalAmount), col5, yPosition, totalAmountPaint)
         yPosition += 25f
 

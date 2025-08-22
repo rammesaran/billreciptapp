@@ -1,18 +1,17 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:async';
-import 'package:billreciptapp/addproductscreen.dart';
+import 'dart:typed_data';
+import 'package:billreciptapp/cart.dart';
 import 'package:billreciptapp/databasehelper.dart';
 import 'package:billreciptapp/usermodel.dart';
+import 'package:billreciptapp/pdf_generator.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
-import 'package:pdf/pdf.dart';
-import 'package:printing/printing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:pdf/widgets.dart' as pw;
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -663,258 +662,82 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
 
   Future<void> _generateAndActionPDF(String action) async {
     try {
-      final Uint8List pdf = await _generatePDF();
+      // Prepare items for PDF generation
+      final items = cartItems
+          .map(
+            (item) => {
+              'productName': isTamil
+                  ? item.product.tamilName
+                  : item.product.name,
+              'quantity': item.quantity,
+              'price': item.product.price,
+              'total': item.total,
+              'unit': item.product.unit,
+            },
+          )
+          .toList();
 
+      final Uint8List? pdfBytes = await PdfGenerator.generatePdf(
+        shopName: isTamil ? shopNameTamil : shopNameEnglish,
+        address: isTamil ? addressTamil : addressEnglish,
+        city: isTamil ? cityTamil : cityEnglish,
+        phone: phone,
+        headerText: headerText,
+        footerText1: footerText1,
+        footerText2: footerText2,
+        footerText3: footerText3,
+        receiptNumber: receiptNumber,
+        items: items,
+        totalAmount: totalAmount,
+        language: isTamil ? 'ta' : 'en',
+      );
+
+      if (pdfBytes == null) {
+        throw Exception('Failed to generate PDF');
+      }
+
+      bool success = false;
       if (action == 'print') {
-        await Printing.layoutPdf(onLayout: (PdfPageFormat format) async => pdf);
-      } else if (action == 'save') {
-        final directory = await getApplicationDocumentsDirectory();
-        final file = File('${directory.path}/receipt_$receiptNumber.pdf');
-        await file.writeAsBytes(pdf);
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(tr('savedSuccess')),
-            backgroundColor: Colors.green,
-          ),
+        success = await PdfGenerator.printPdf(
+          pdfBytes: pdfBytes,
+          jobName: 'Receipt_$receiptNumber',
         );
+      } else if (action == 'save') {
+        success = await PdfGenerator.savePdf(
+          pdfBytes: pdfBytes,
+          fileName: 'receipt_$receiptNumber.pdf',
+        );
+        if (success) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(tr('savedSuccess')),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
       } else if (action == 'share') {
-        final directory = await getTemporaryDirectory();
-        final file = File('${directory.path}/receipt_$receiptNumber.pdf');
-        await file.writeAsBytes(pdf);
-
-        await Share.shareXFiles(
-          [XFile(file.path)],
-          text:
+        success = await PdfGenerator.sharePdf(
+          pdfBytes: pdfBytes,
+          fileName: 'receipt_$receiptNumber.pdf',
+          shareText:
               '${isTamil ? shopNameTamil : shopNameEnglish} - Receipt #$receiptNumber',
         );
       }
 
-      await _saveReceiptToLocal();
-      if (isOnline) {
-        await _saveReceiptToFirestore();
+      if (success || action == 'share') {
+        await _saveReceiptToLocal();
+        if (isOnline) {
+          await _saveReceiptToFirestore();
+        }
+        await _incrementReceiptNumber();
+        _clearCart();
       }
-      await _incrementReceiptNumber();
-      _clearCart();
     } catch (e) {
       print('Error with PDF: $e');
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
       );
     }
-  }
-
-  Future<Uint8List> _generatePDF() async {
-    final pdf = pw.Document();
-
-    final tamilFont = await PdfGoogleFonts.notoSansTamilRegular();
-    final tamilFontBold = await PdfGoogleFonts.notoSansTamilBold();
-    final englishFont = await PdfGoogleFonts.robotoRegular();
-    final englishFontBold = await PdfGoogleFonts.robotoBold();
-
-    final font = isTamil ? tamilFont : englishFont;
-    final fontBold = isTamil ? tamilFontBold : englishFontBold;
-
-    pdf.addPage(
-      pw.Page(
-        pageFormat: PdfPageFormat(
-          80 * PdfPageFormat.mm,
-          double.infinity,
-          marginAll: 5 * PdfPageFormat.mm,
-        ),
-        build: (pw.Context context) {
-          return pw.Column(
-            crossAxisAlignment: pw.CrossAxisAlignment.center,
-            children: [
-              if (isTamil)
-                pw.Text(
-                  headerText,
-                  style: pw.TextStyle(font: font, fontSize: 10),
-                ),
-              pw.Text(
-                isTamil ? 'மதிப்பீட்டு ரசீது' : 'Receipt',
-                style: pw.TextStyle(font: fontBold, fontSize: 12),
-              ),
-              pw.Text(
-                isTamil ? shopNameTamil : shopNameEnglish,
-                style: pw.TextStyle(font: fontBold, fontSize: 14),
-              ),
-              pw.Text(
-                isTamil ? addressTamil : addressEnglish,
-                style: pw.TextStyle(font: font, fontSize: 10),
-              ),
-              pw.Text(
-                isTamil ? cityTamil : cityEnglish,
-                style: pw.TextStyle(font: font, fontSize: 10),
-              ),
-              pw.Text(
-                'Phone: $phone',
-                style: pw.TextStyle(font: font, fontSize: 10),
-              ),
-              pw.SizedBox(height: 5),
-              pw.Row(
-                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
-                children: [
-                  pw.Text(
-                    'No: $receiptNumber',
-                    style: pw.TextStyle(font: font, fontSize: 10),
-                  ),
-                  pw.Text(
-                    DateFormat('hh:mm:ss a dd/MM/yyyy').format(DateTime.now()),
-                    style: pw.TextStyle(font: font, fontSize: 10),
-                  ),
-                ],
-              ),
-              pw.Divider(),
-
-              // Table Header
-              pw.Row(
-                children: [
-                  pw.Container(width: 15, child: pw.Text('')),
-                  pw.Container(
-                    width: 105,
-                    child: pw.Text(
-                      tr('details'),
-                      style: pw.TextStyle(font: fontBold, fontSize: 10),
-                    ),
-                  ),
-                  pw.Container(
-                    width: 40,
-                    child: pw.Text(
-                      tr('qty'),
-                      style: pw.TextStyle(font: fontBold, fontSize: 10),
-                      textAlign: pw.TextAlign.center,
-                    ),
-                  ),
-                  pw.Container(
-                    width: 35,
-                    child: pw.Text(
-                      tr('rate'),
-                      style: pw.TextStyle(font: fontBold, fontSize: 10),
-                      textAlign: pw.TextAlign.right,
-                    ),
-                  ),
-                  pw.Container(
-                    width: 45,
-                    child: pw.Text(
-                      tr('amount'),
-                      style: pw.TextStyle(font: fontBold, fontSize: 10),
-                      textAlign: pw.TextAlign.right,
-                    ),
-                  ),
-                ],
-              ),
-              pw.Divider(),
-
-              // Items
-              ...cartItems.asMap().entries.map((entry) {
-                final index = entry.key + 1;
-                final item = entry.value;
-
-                return pw.Padding(
-                  padding: pw.EdgeInsets.symmetric(vertical: 1),
-                  child: pw.Row(
-                    children: [
-                      pw.Container(
-                        width: 15,
-                        child: pw.Text(
-                          '$index',
-                          style: pw.TextStyle(font: font, fontSize: 9),
-                        ),
-                      ),
-                      pw.Container(
-                        width: 105,
-                        child: pw.Text(
-                          isTamil ? item.product.tamilName : item.product.name,
-                          style: pw.TextStyle(font: font, fontSize: 9),
-                        ),
-                      ),
-                      pw.Container(
-                        width: 40,
-                        child: pw.Text(
-                          '${item.quantity}${item.product.unit}',
-                          style: pw.TextStyle(font: font, fontSize: 9),
-                          textAlign: pw.TextAlign.center,
-                        ),
-                      ),
-                      pw.Container(
-                        width: 35,
-                        child: pw.Text(
-                          item.product.price.toStringAsFixed(2),
-                          style: pw.TextStyle(font: font, fontSize: 9),
-                          textAlign: pw.TextAlign.right,
-                        ),
-                      ),
-                      pw.Container(
-                        width: 45,
-                        child: pw.Text(
-                          item.total.toStringAsFixed(2),
-                          style: pw.TextStyle(font: font, fontSize: 9),
-                          textAlign: pw.TextAlign.right,
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              }),
-
-              pw.Divider(),
-
-              // Total
-              pw.Row(
-                children: [
-                  pw.Container(
-                    width: 195,
-                    child: pw.Text(
-                      tr('total'),
-                      style: pw.TextStyle(font: fontBold, fontSize: 11),
-                      textAlign: pw.TextAlign.right,
-                    ),
-                  ),
-                  pw.Container(
-                    width: 45,
-                    child: pw.Text(
-                      totalAmount.toStringAsFixed(2),
-                      style: pw.TextStyle(font: fontBold, fontSize: 11),
-                      textAlign: pw.TextAlign.right,
-                    ),
-                  ),
-                ],
-              ),
-
-              pw.SizedBox(height: 10),
-              pw.Text(
-                tr('thanks'),
-                style: pw.TextStyle(font: font, fontSize: 10),
-              ),
-              pw.Text(
-                tr('visitAgain'),
-                style: pw.TextStyle(font: font, fontSize: 10),
-              ),
-
-              if (isTamil) ...[
-                pw.SizedBox(height: 10),
-                pw.Divider(),
-                pw.Text(
-                  footerText1,
-                  style: pw.TextStyle(font: font, fontSize: 8),
-                ),
-                pw.Text(
-                  footerText2,
-                  style: pw.TextStyle(font: font, fontSize: 8),
-                ),
-                pw.Text(
-                  footerText3,
-                  style: pw.TextStyle(font: font, fontSize: 8),
-                ),
-              ],
-            ],
-          );
-        },
-      ),
-    );
-
-    return pdf.save(); // This returns Future<Uint8List>
   }
 
   Future<void> _saveReceiptToLocal() async {
@@ -1011,42 +834,33 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                                     IconButton(
                                       icon: Icon(
                                         Icons.remove_circle,
-                                        color: Colors.orange,
+                                        color: item.quantity == 1
+                                            ? Colors.grey
+                                            : Colors.orange,
                                       ),
-                                      onPressed: () {
-                                        _updateQuantity(
-                                          index,
-                                          item.quantity - 1,
-                                        );
-                                        setModalState(() {});
-                                      },
-                                    ),
-                                    Text(
-                                      '${item.quantity.toStringAsFixed(0)}',
-                                      style: TextStyle(fontSize: 16),
+                                      onPressed: item.quantity == 1
+                                          ? null
+                                          : () => _updateQuantity(
+                                              index,
+                                              item.quantity - 1,
+                                            ),
                                     ),
                                     IconButton(
                                       icon: Icon(
                                         Icons.add_circle,
                                         color: Colors.green,
                                       ),
-                                      onPressed: () {
-                                        _updateQuantity(
-                                          index,
-                                          item.quantity + 1,
-                                        );
-                                        setModalState(() {});
-                                      },
+                                      onPressed: () => _updateQuantity(
+                                        index,
+                                        item.quantity + 1,
+                                      ),
                                     ),
                                     IconButton(
                                       icon: Icon(
                                         Icons.delete,
                                         color: Colors.red,
                                       ),
-                                      onPressed: () {
-                                        _removeFromCart(index);
-                                        setModalState(() {});
-                                      },
+                                      onPressed: () => _removeFromCart(index),
                                     ),
                                   ],
                                 ),
@@ -1283,8 +1097,39 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                   ),
               ],
             ),
-            onPressed: _showCartBottomSheet,
-            tooltip: tr('cart'),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => CartScreen(
+                    cartItems: cartItems,
+                    onUpdateQuantity: _updateQuantity,
+                    onRemoveFromCart: _removeFromCart,
+                    onClearCart: _clearCart,
+                    onCartUpdated: () {
+                      setState(() {}); // Refresh the main screen
+                    },
+                    isTamil: isTamil,
+                    isOnline: isOnline,
+                    shopNameTamil: shopNameTamil,
+                    shopNameEnglish: shopNameEnglish,
+                    addressTamil: addressTamil,
+                    addressEnglish: addressEnglish,
+                    cityTamil: cityTamil,
+                    cityEnglish: cityEnglish,
+                    phone: phone,
+                    headerText: headerText,
+                    footerText1: footerText1,
+                    footerText2: footerText2,
+                    footerText3: footerText3,
+                    receiptNumber: receiptNumber,
+                  ),
+                ),
+              );
+            },
+
+            // _showCartBottomSheet,
+            // tooltip: tr('cart'),
           ),
           IconButton(
             icon: Container(
@@ -1504,7 +1349,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                   ),
           ),
 
-          // Divider(thickness: 2),
+          Divider(thickness: 2),
 
           // Cart Section
           // Expanded(

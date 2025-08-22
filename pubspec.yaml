@@ -36,8 +36,13 @@ dependencies:
   cupertino_icons: ^1.0.8
   sqflite: ^2.3.0
   path: ^1.8.3
-  pdf: ^3.10.7
-  printing: ^5.11.1
+ 
+  # pdf: ^3.7.4
+  # printing: ^5.9.3
+  # pdf: ^3.10.7
+  # printing: ^5.11.1
+
+
   intl: ^0.18.1
   path_provider: ^2.1.1
   share_plus: ^7.2.1
@@ -46,7 +51,17 @@ dependencies:
   cloud_firestore: ^4.14.0
   mobile_scanner: ^3.5.5
   connectivity_plus: ^5.0.2
-  syncfusion_flutter_pdf: ^30.2.6
+
+
+  # esc_pos_printer: ^4.1.0
+  # esc_pos_utils: ^1.1.0
+  # esc_pos_bluetooth: ^0.4.1
+  # # flutter_bluetooth_serial: ^0.4.0
+  # image: ^3.0.2
+  # screenshot: ^2.1.0
+  # permission_handler: ^10.4.3
+  # charset_converter: ^2.1.1
+
   
 
 dev_dependencies:
@@ -88,11 +103,9 @@ flutter:
   # list giving the asset and other descriptors for the font. For
   # example:
   fonts:
-    # - family: Latha
-    #   fonts:
-    #     - asset: assets/fonts/Latha.ttf
-    #     # - asset: fonts/Schyler-Italic.ttf
-    #     #   style: italic
+    - family: Latha
+      fonts:
+        - asset: assets/fonts/Latha.ttf
     - family: NotoSansTamil
       fonts:
         - asset: assets/fonts/NotoSansTamil-Regular.ttf

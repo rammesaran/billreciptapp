@@ -90,95 +90,173 @@ class MainActivity: FlutterActivity() {
         val language = arguments["language"] as String
         val timestamp = arguments["timestamp"] as Long
 
-        // Create PDF document
+        // Create PDF document with proper thermal receipt dimensions
         val pdfDocument = PdfDocument()
-        val pageInfo = PdfDocument.PageInfo.Builder(226, 800, 1).create() // 80mm width
+        // 80mm width = 226 points, dynamic height based on content
+        val estimatedHeight = 200 + (items.size * 15) + if (language == "ta") 100 else 50
+        val pageInfo = PdfDocument.PageInfo.Builder(226, estimatedHeight, 1).create()
         val page = pdfDocument.startPage(pageInfo)
         val canvas = page.canvas
 
-        // Paint objects for different text styles
+        // Paint objects for different text styles with proper spacing
         val titlePaint = Paint().apply {
             color = Color.BLACK
-            textSize = 14f
+            textSize = 16f
             isFakeBoldText = true
             textAlign = Paint.Align.CENTER
+            letterSpacing = 0.1f
         }
 
         val headerPaint = Paint().apply {
             color = Color.BLACK
-            textSize = 12f
+            textSize = 14f
             isFakeBoldText = true
             textAlign = Paint.Align.CENTER
+            letterSpacing = 0.1f
         }
 
         val normalPaint = Paint().apply {
             color = Color.BLACK
-            textSize = 10f
-            textAlign = Paint.Align.LEFT
+            textSize = 11f
+            textAlign = Paint.Align.CENTER
+            letterSpacing = 0.05f
         }
 
         val smallPaint = Paint().apply {
             color = Color.BLACK
-            textSize = 8f
+            textSize = 9f
             textAlign = Paint.Align.LEFT
+            letterSpacing = 0.05f
         }
 
         val centerPaint = Paint().apply {
             color = Color.BLACK
-            textSize = 10f
+            textSize = 11f
             textAlign = Paint.Align.CENTER
+            letterSpacing = 0.05f
         }
 
-        var yPosition = 30f
-        val pageWidth = 226f
-        val margin = 10f
+        val rightAlignPaint = Paint().apply {
+            color = Color.BLACK
+            textSize = 9f
+            textAlign = Paint.Align.RIGHT
+            letterSpacing = 0.05f
+        }
 
-        // Header
+        val boldSmallPaint = Paint().apply {
+            color = Color.BLACK
+            textSize = 10f
+            isFakeBoldText = true
+            textAlign = Paint.Align.LEFT
+            letterSpacing = 0.05f
+        }
+
+        var yPosition = 25f
+        val pageWidth = 226f
+        val margin = 8f
+
+        // Header text (Tamil only)
         if (language == "ta") {
             canvas.drawText(headerText, pageWidth / 2, yPosition, centerPaint)
-            yPosition += 20f
+            yPosition += 18f
         }
 
+        // Receipt title
         canvas.drawText(if (language == "ta") "மதிப்பீட்டு ரசீது" else "Receipt", pageWidth / 2, yPosition, titlePaint)
-        yPosition += 20f
+        yPosition += 22f
 
+        // Shop name
         canvas.drawText(shopName, pageWidth / 2, yPosition, headerPaint)
+        yPosition += 18f
+
+        // Address
+        canvas.drawText(address, pageWidth / 2, yPosition, normalPaint)
         yPosition += 15f
 
-        canvas.drawText(address, pageWidth / 2, yPosition, normalPaint)
-        yPosition += 12f
-
+        // City
         canvas.drawText(city, pageWidth / 2, yPosition, normalPaint)
-        yPosition += 12f
+        yPosition += 15f
 
+        // Phone
         canvas.drawText("Phone: $phone", pageWidth / 2, yPosition, normalPaint)
         yPosition += 20f
 
-        // Receipt number and date
+        // Receipt number and date on same line
         val dateFormat = SimpleDateFormat("hh:mm:ss a dd/MM/yyyy", Locale.getDefault())
         val dateString = dateFormat.format(Date(timestamp))
         
-        canvas.drawText("No: $receiptNumber", margin, yPosition, normalPaint)
-        canvas.drawText(dateString, pageWidth - margin - 80f, yPosition, normalPaint)
-        yPosition += 20f
+        val receiptNoPaint = Paint().apply {
+            color = Color.BLACK
+            textSize = 10f
+            textAlign = Paint.Align.LEFT
+        }
+        
+        val datePaint = Paint().apply {
+            color = Color.BLACK
+            textSize = 10f
+            textAlign = Paint.Align.RIGHT
+        }
+        
+        canvas.drawText("No: $receiptNumber", margin, yPosition, receiptNoPaint)
+        canvas.drawText(dateString, pageWidth - margin, yPosition, datePaint)
+        yPosition += 18f
 
-        // Draw line
-        canvas.drawLine(margin, yPosition, pageWidth - margin, yPosition, normalPaint)
+        // Draw separator line
+        val linePaint = Paint().apply {
+            color = Color.BLACK
+            strokeWidth = 1f
+        }
+        canvas.drawLine(margin, yPosition, pageWidth - margin, yPosition, linePaint)
+        yPosition += 12f
+
+        // Table header with fixed positioning to prevent overlap
+        val headerBoldPaint = Paint().apply {
+            color = Color.BLACK
+            textSize = 9f
+            isFakeBoldText = true
+            textAlign = Paint.Align.LEFT
+        }
+
+        // Precise column positions for 80mm thermal paper (226 points width)
+        val col1 = margin + 2f   // S.No
+        val col2 = margin + 18f  // Details  
+        val col3 = margin + 110f // Qty
+        val col4 = margin + 150f // Rate
+        val col5 = margin + 190f // Amount
+
+        canvas.drawText("S.No", col1, yPosition, headerBoldPaint)
+        canvas.drawText(if (language == "ta") "விபரங்கள்" else "Details", col2, yPosition, headerBoldPaint)
+        
+        val qtyHeaderPaint = Paint().apply {
+            color = Color.BLACK
+            textSize = 9f
+            isFakeBoldText = true
+            textAlign = Paint.Align.LEFT
+        }
+        canvas.drawText(if (language == "ta") "அளவு" else "Qty", col3, yPosition, qtyHeaderPaint)
+        
+        val rateHeaderPaint = Paint().apply {
+            color = Color.BLACK
+            textSize = 9f
+            isFakeBoldText = true
+            textAlign = Paint.Align.LEFT
+        }
+        canvas.drawText(if (language == "ta") "விலை" else "Rate", col4, yPosition, rateHeaderPaint)
+        
+        val amountHeaderPaint = Paint().apply {
+            color = Color.BLACK
+            textSize = 9f
+            isFakeBoldText = true
+            textAlign = Paint.Align.LEFT
+        }
+        canvas.drawText(if (language == "ta") "தொகை" else "Amount", col5, yPosition, amountHeaderPaint)
         yPosition += 15f
 
-        // Table header
-        canvas.drawText("", margin, yPosition, normalPaint)
-        canvas.drawText(if (language == "ta") "விபரங்கள்" else "Details", margin + 15f, yPosition, normalPaint)
-        canvas.drawText(if (language == "ta") "அளவு" else "Qty", margin + 105f, yPosition, normalPaint)
-        canvas.drawText(if (language == "ta") "விலை" else "Rate", margin + 140f, yPosition, normalPaint)
-        canvas.drawText(if (language == "ta") "தொகை" else "Amount", margin + 180f, yPosition, normalPaint)
-        yPosition += 15f
+        // Draw separator line
+        canvas.drawLine(margin, yPosition, pageWidth - margin, yPosition, linePaint)
+        yPosition += 8f
 
-        // Draw line
-        canvas.drawLine(margin, yPosition, pageWidth - margin, yPosition, normalPaint)
-        yPosition += 10f
-
-        // Items
+        // Items with precise positioning to avoid overlap
         items.forEachIndexed { index, item ->
             val itemName = item["productName"] as String
             val quantity = item["quantity"] as Double
@@ -186,37 +264,91 @@ class MainActivity: FlutterActivity() {
             val total = item["total"] as Double
             val unit = item["unit"] as? String ?: ""
 
-            canvas.drawText("${index + 1}", margin, yPosition, smallPaint)
-            canvas.drawText(itemName, margin + 15f, yPosition, smallPaint)
-            canvas.drawText("$quantity$unit", margin + 105f, yPosition, smallPaint)
-            canvas.drawText(String.format("%.2f", price), margin + 140f, yPosition, smallPaint)
-            canvas.drawText(String.format("%.2f", total), margin + 180f, yPosition, smallPaint)
-            yPosition += 12f
+            // Truncate item names more aggressively for Tamil text
+            val truncatedName = if (itemName.length > 10) {
+                itemName.substring(0, 10) + ".."
+            } else {
+                itemName
+            }
+
+            val itemPaint = Paint().apply {
+                color = Color.BLACK
+                textSize = 8f
+                textAlign = Paint.Align.LEFT
+            }
+
+            val qtyPaint = Paint().apply {
+                color = Color.BLACK
+                textSize = 8f
+                textAlign = Paint.Align.LEFT
+            }
+
+            val pricePaint = Paint().apply {
+                color = Color.BLACK
+                textSize = 8f
+                textAlign = Paint.Align.LEFT
+            }
+
+            val totalPaint = Paint().apply {
+                color = Color.BLACK
+                textSize = 8f
+                textAlign = Paint.Align.LEFT
+            }
+
+            // Draw items with fixed positions
+            canvas.drawText("${index + 1}", col1, yPosition, itemPaint)
+            canvas.drawText(truncatedName, col2, yPosition, itemPaint)
+            canvas.drawText("$quantity$unit", col3, yPosition, qtyPaint)
+            canvas.drawText(String.format("%.2f", price), col4, yPosition, pricePaint)
+            canvas.drawText(String.format("%.2f", total), col5, yPosition, totalPaint)
+            yPosition += 13f
         }
 
-        // Draw line
-        canvas.drawLine(margin, yPosition, pageWidth - margin, yPosition, normalPaint)
-        yPosition += 15f
+        // Draw separator line
+        canvas.drawLine(margin, yPosition, pageWidth - margin, yPosition, linePaint)
+        yPosition += 12f
 
-        // Total
-        canvas.drawText(if (language == "ta") "மொத்தம்:" else "Total:", margin + 140f, yPosition, headerPaint)
-        canvas.drawText(String.format("%.2f", totalAmount), margin + 180f, yPosition, headerPaint)
+        // Total with proper alignment
+        val totalLabelPaint = Paint().apply {
+            color = Color.BLACK
+            textSize = 11f
+            isFakeBoldText = true
+            textAlign = Paint.Align.LEFT
+        }
+
+        val totalAmountPaint = Paint().apply {
+            color = Color.BLACK
+            textSize = 11f
+            isFakeBoldText = true
+            textAlign = Paint.Align.LEFT
+        }
+
+        canvas.drawText(if (language == "ta") "மொத்தம்:" else "Total:", col4, yPosition, totalLabelPaint)
+        canvas.drawText(String.format("%.2f", totalAmount), col5, yPosition, totalAmountPaint)
         yPosition += 25f
 
-        // Footer
+        // Footer messages
         canvas.drawText(if (language == "ta") "நன்றி" else "Thank You", pageWidth / 2, yPosition, centerPaint)
         yPosition += 15f
         canvas.drawText(if (language == "ta") "மீண்டும் வாருங்கள்" else "Visit Again", pageWidth / 2, yPosition, centerPaint)
         yPosition += 20f
 
+        // Tamil footer texts
         if (language == "ta") {
-            canvas.drawLine(margin, yPosition, pageWidth - margin, yPosition, normalPaint)
+            canvas.drawLine(margin, yPosition, pageWidth - margin, yPosition, linePaint)
             yPosition += 15f
-            canvas.drawText(footerText1, pageWidth / 2, yPosition, smallPaint)
-            yPosition += 12f
-            canvas.drawText(footerText2, pageWidth / 2, yPosition, smallPaint)
-            yPosition += 12f
-            canvas.drawText(footerText3, pageWidth / 2, yPosition, smallPaint)
+            
+            val footerPaint = Paint().apply {
+                color = Color.BLACK
+                textSize = 9f
+                textAlign = Paint.Align.CENTER
+            }
+            
+            canvas.drawText(footerText1, pageWidth / 2, yPosition, footerPaint)
+            yPosition += 14f
+            canvas.drawText(footerText2, pageWidth / 2, yPosition, footerPaint)
+            yPosition += 14f
+            canvas.drawText(footerText3, pageWidth / 2, yPosition, footerPaint)
         }
 
         pdfDocument.finishPage(page)

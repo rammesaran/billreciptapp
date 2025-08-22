@@ -184,25 +184,79 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
 
   Future<void> _loadShopDetails() async {
     try {
-      final doc = await _firestore.collection('settings').doc('shop').get();
-      if (doc.exists) {
-        final data = doc.data()!;
+      // Load shop details from Firestore if online
+      if (isOnline) {
+        final doc = await _firestore.collection('settings').doc('shop').get();
+        if (doc.exists) {
+          final data = doc.data()!;
+          setState(() {
+            shopNameTamil = data['shopNameTamil'] ?? shopNameTamil;
+            shopNameEnglish = data['shopNameEnglish'] ?? shopNameEnglish;
+            addressTamil = data['addressTamil'] ?? addressTamil;
+            addressEnglish = data['addressEnglish'] ?? addressEnglish;
+            cityTamil = data['cityTamil'] ?? cityTamil;
+            cityEnglish = data['cityEnglish'] ?? cityEnglish;
+            phone = data['phone'] ?? phone;
+            headerText = data['headerText'] ?? headerText;
+            footerText1 = data['footerText1'] ?? footerText1;
+            footerText2 = data['footerText2'] ?? footerText2;
+            footerText3 = data['footerText3'] ?? footerText3;
+          });
+
+          // Save to SharedPreferences for offline use
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('shopNameTamil', shopNameTamil);
+          await prefs.setString('shopNameEnglish', shopNameEnglish);
+          await prefs.setString('addressTamil', addressTamil);
+          await prefs.setString('addressEnglish', addressEnglish);
+          await prefs.setString('cityTamil', cityTamil);
+          await prefs.setString('cityEnglish', cityEnglish);
+          await prefs.setString('phone', phone);
+          await prefs.setString('headerText', headerText);
+          await prefs.setString('footerText1', footerText1);
+          await prefs.setString('footerText2', footerText2);
+          await prefs.setString('footerText3', footerText3);
+        }
+      } else {
+        // Load from SharedPreferences when offline
+        final prefs = await SharedPreferences.getInstance();
         setState(() {
-          shopNameTamil = data['shopNameTamil'] ?? shopNameTamil;
-          shopNameEnglish = data['shopNameEnglish'] ?? shopNameEnglish;
-          addressTamil = data['addressTamil'] ?? addressTamil;
-          addressEnglish = data['addressEnglish'] ?? addressEnglish;
-          cityTamil = data['cityTamil'] ?? cityTamil;
-          cityEnglish = data['cityEnglish'] ?? cityEnglish;
-          phone = data['phone'] ?? phone;
-          headerText = data['headerText'] ?? headerText;
-          footerText1 = data['footerText1'] ?? footerText1;
-          footerText2 = data['footerText2'] ?? footerText2;
-          footerText3 = data['footerText3'] ?? footerText3;
+          shopNameTamil = prefs.getString('shopNameTamil') ?? shopNameTamil;
+          shopNameEnglish =
+              prefs.getString('shopNameEnglish') ?? shopNameEnglish;
+          addressTamil = prefs.getString('addressTamil') ?? addressTamil;
+          addressEnglish = prefs.getString('addressEnglish') ?? addressEnglish;
+          cityTamil = prefs.getString('cityTamil') ?? cityTamil;
+          cityEnglish = prefs.getString('cityEnglish') ?? cityEnglish;
+          phone = prefs.getString('phone') ?? phone;
+          headerText = prefs.getString('headerText') ?? headerText;
+          footerText1 = prefs.getString('footerText1') ?? footerText1;
+          footerText2 = prefs.getString('footerText2') ?? footerText2;
+          footerText3 = prefs.getString('footerText3') ?? footerText3;
         });
       }
     } catch (e) {
       print('Error loading shop details: $e');
+      // Fallback to SharedPreferences if Firestore fails
+      try {
+        final prefs = await SharedPreferences.getInstance();
+        setState(() {
+          shopNameTamil = prefs.getString('shopNameTamil') ?? shopNameTamil;
+          shopNameEnglish =
+              prefs.getString('shopNameEnglish') ?? shopNameEnglish;
+          addressTamil = prefs.getString('addressTamil') ?? addressTamil;
+          addressEnglish = prefs.getString('addressEnglish') ?? addressEnglish;
+          cityTamil = prefs.getString('cityTamil') ?? cityTamil;
+          cityEnglish = prefs.getString('cityEnglish') ?? cityEnglish;
+          phone = prefs.getString('phone') ?? phone;
+          headerText = prefs.getString('headerText') ?? headerText;
+          footerText1 = prefs.getString('footerText1') ?? footerText1;
+          footerText2 = prefs.getString('footerText2') ?? footerText2;
+          footerText3 = prefs.getString('footerText3') ?? footerText3;
+        });
+      } catch (e2) {
+        print('Error loading from SharedPreferences: $e2');
+      }
     }
   }
 
@@ -314,10 +368,23 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
   Future<void> _incrementReceiptNumber() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      final newReceiptNumber = receiptNumber + 1;
       setState(() {
-        receiptNumber++;
+        receiptNumber = newReceiptNumber;
       });
-      await prefs.setInt('receiptNumber', receiptNumber);
+      await prefs.setInt('receiptNumber', newReceiptNumber);
+
+      // Also update in Firestore if online
+      if (isOnline) {
+        try {
+          await _firestore.collection('settings').doc('shop').update({
+            'lastReceiptNumber': newReceiptNumber,
+            'lastUpdated': FieldValue.serverTimestamp(),
+          });
+        } catch (e) {
+          print('Error updating receipt number in Firestore: $e');
+        }
+      }
     } catch (e) {
       print('Error incrementing receipt number: $e');
     }

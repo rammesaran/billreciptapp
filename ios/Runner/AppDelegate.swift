@@ -176,25 +176,28 @@ import PDFKit
     timestamp: Int64
   ) -> Data {
     
-    let pageRect = CGRect(x: 0, y: 0, width: 226, height: 800) // 80mm width
+    // Dynamic height calculation based on content
+    let estimatedHeight = 200 + (items.count * 15) + (language == "ta" ? 100 : 50)
+    let pageRect = CGRect(x: 0, y: 0, width: 226, height: estimatedHeight) // 80mm width
     let renderer = UIGraphicsPDFRenderer(bounds: pageRect)
     
     let data = renderer.pdfData { (context) in
       context.beginPage()
       
-      var yPosition: CGFloat = 30
-      let margin: CGFloat = 10
+      var yPosition: CGFloat = 25
+      let margin: CGFloat = 8
       let pageWidth: CGFloat = 226
       
-      // Fonts
-      let titleFont = UIFont.boldSystemFont(ofSize: 14)
-      let headerFont = UIFont.boldSystemFont(ofSize: 12)
-      let normalFont = UIFont.systemFont(ofSize: 10)
-      let smallFont = UIFont.systemFont(ofSize: 8)
+      // Improved fonts with better spacing
+      let titleFont = UIFont.boldSystemFont(ofSize: 16)
+      let headerFont = UIFont.boldSystemFont(ofSize: 14)
+      let normalFont = UIFont.systemFont(ofSize: 11)
+      let smallFont = UIFont.systemFont(ofSize: 9)
+      let boldSmallFont = UIFont.boldSystemFont(ofSize: 10)
       
-      // Header
+      // Header text (Tamil only)
       if language == "ta" {
-        let headerRect = CGRect(x: margin, y: yPosition, width: pageWidth - 2 * margin, height: 20)
+        let headerRect = CGRect(x: margin, y: yPosition, width: pageWidth - 2 * margin, height: 18)
         headerText.draw(in: headerRect, withAttributes: [
           .font: normalFont,
           .foregroundColor: UIColor.black,
@@ -204,12 +207,12 @@ import PDFKit
             return style
           }()
         ])
-        yPosition += 20
+        yPosition += 18
       }
       
-      // Title
+      // Receipt title
       let titleText = language == "ta" ? "மதிப்பீட்டு ரசீது" : "Receipt"
-      let titleRect = CGRect(x: margin, y: yPosition, width: pageWidth - 2 * margin, height: 20)
+      let titleRect = CGRect(x: margin, y: yPosition, width: pageWidth - 2 * margin, height: 22)
       titleText.draw(in: titleRect, withAttributes: [
         .font: titleFont,
         .foregroundColor: UIColor.black,
@@ -219,10 +222,10 @@ import PDFKit
           return style
         }()
       ])
-      yPosition += 20
+      yPosition += 22
       
       // Shop name
-      let shopRect = CGRect(x: margin, y: yPosition, width: pageWidth - 2 * margin, height: 15)
+      let shopRect = CGRect(x: margin, y: yPosition, width: pageWidth - 2 * margin, height: 18)
       shopName.draw(in: shopRect, withAttributes: [
         .font: headerFont,
         .foregroundColor: UIColor.black,
@@ -232,10 +235,10 @@ import PDFKit
           return style
         }()
       ])
-      yPosition += 15
+      yPosition += 18
       
       // Address
-      let addressRect = CGRect(x: margin, y: yPosition, width: pageWidth - 2 * margin, height: 12)
+      let addressRect = CGRect(x: margin, y: yPosition, width: pageWidth - 2 * margin, height: 15)
       address.draw(in: addressRect, withAttributes: [
         .font: normalFont,
         .foregroundColor: UIColor.black,
@@ -245,10 +248,10 @@ import PDFKit
           return style
         }()
       ])
-      yPosition += 12
+      yPosition += 15
       
       // City
-      let cityRect = CGRect(x: margin, y: yPosition, width: pageWidth - 2 * margin, height: 12)
+      let cityRect = CGRect(x: margin, y: yPosition, width: pageWidth - 2 * margin, height: 15)
       city.draw(in: cityRect, withAttributes: [
         .font: normalFont,
         .foregroundColor: UIColor.black,
@@ -258,10 +261,10 @@ import PDFKit
           return style
         }()
       ])
-      yPosition += 12
+      yPosition += 15
       
       // Phone
-      let phoneRect = CGRect(x: margin, y: yPosition, width: pageWidth - 2 * margin, height: 12)
+      let phoneRect = CGRect(x: margin, y: yPosition, width: pageWidth - 2 * margin, height: 15)
       "Phone: \(phone)".draw(in: phoneRect, withAttributes: [
         .font: normalFont,
         .foregroundColor: UIColor.black,
@@ -281,45 +284,87 @@ import PDFKit
       
       let receiptNoRect = CGRect(x: margin, y: yPosition, width: 100, height: 12)
       "No: \(receiptNumber)".draw(in: receiptNoRect, withAttributes: [
-        .font: normalFont,
+        .font: smallFont,
         .foregroundColor: UIColor.black
       ])
       
       let dateRect = CGRect(x: pageWidth - margin - 80, y: yPosition, width: 80, height: 12)
       dateString.draw(in: dateRect, withAttributes: [
-        .font: normalFont,
-        .foregroundColor: UIColor.black
+        .font: smallFont,
+        .foregroundColor: UIColor.black,
+        .paragraphStyle: {
+          let style = NSMutableParagraphStyle()
+          style.alignment = .right
+          return style
+        }()
       ])
-      yPosition += 20
+      yPosition += 18
       
-      // Draw line
+      // Draw separator line
       let context = UIGraphicsGetCurrentContext()!
       context.setStrokeColor(UIColor.black.cgColor)
       context.setLineWidth(1.0)
       context.move(to: CGPoint(x: margin, y: yPosition))
       context.addLine(to: CGPoint(x: pageWidth - margin, y: yPosition))
       context.strokePath()
-      yPosition += 15
+      yPosition += 12
       
-      // Table header
+      // Table header with proper column alignment
+      let col1: CGFloat = margin + 2  // S.No
+      let col2: CGFloat = margin + 18 // Details
+      let col3: CGFloat = margin + 120 // Qty
+      let col4: CGFloat = margin + 155 // Rate
+      let col5: CGFloat = margin + 190 // Amount
+      
+      "S.No".draw(at: CGPoint(x: col1, y: yPosition), withAttributes: [.font: boldSmallFont, .foregroundColor: UIColor.black])
+      
       let detailsText = language == "ta" ? "விபரங்கள்" : "Details"
-      let qtyText = language == "ta" ? "அளவு" : "Qty"
-      let rateText = language == "ta" ? "விலை" : "Rate"
-      let amountText = language == "ta" ? "தொகை" : "Amount"
+      detailsText.draw(at: CGPoint(x: col2, y: yPosition), withAttributes: [.font: boldSmallFont, .foregroundColor: UIColor.black])
       
-      detailsText.draw(at: CGPoint(x: margin + 15, y: yPosition), withAttributes: [.font: normalFont, .foregroundColor: UIColor.black])
-      qtyText.draw(at: CGPoint(x: margin + 105, y: yPosition), withAttributes: [.font: normalFont, .foregroundColor: UIColor.black])
-      rateText.draw(at: CGPoint(x: margin + 140, y: yPosition), withAttributes: [.font: normalFont, .foregroundColor: UIColor.black])
-      amountText.draw(at: CGPoint(x: margin + 180, y: yPosition), withAttributes: [.font: normalFont, .foregroundColor: UIColor.black])
+      let qtyText = language == "ta" ? "அளவு" : "Qty"
+      let qtyRect = CGRect(x: col3 - 15, y: yPosition, width: 30, height: 12)
+      qtyText.draw(in: qtyRect, withAttributes: [
+        .font: boldSmallFont,
+        .foregroundColor: UIColor.black,
+        .paragraphStyle: {
+          let style = NSMutableParagraphStyle()
+          style.alignment = .center
+          return style
+        }()
+      ])
+      
+      let rateText = language == "ta" ? "விலை" : "Rate"
+      let rateRect = CGRect(x: col4 - 20, y: yPosition, width: 40, height: 12)
+      rateText.draw(in: rateRect, withAttributes: [
+        .font: boldSmallFont,
+        .foregroundColor: UIColor.black,
+        .paragraphStyle: {
+          let style = NSMutableParagraphStyle()
+          style.alignment = .right
+          return style
+        }()
+      ])
+      
+      let amountText = language == "ta" ? "தொகை" : "Amount"
+      let amountRect = CGRect(x: col5 - 25, y: yPosition, width: 35, height: 12)
+      amountText.draw(in: amountRect, withAttributes: [
+        .font: boldSmallFont,
+        .foregroundColor: UIColor.black,
+        .paragraphStyle: {
+          let style = NSMutableParagraphStyle()
+          style.alignment = .right
+          return style
+        }()
+      ])
       yPosition += 15
       
-      // Draw line
+      // Draw separator line
       context.move(to: CGPoint(x: margin, y: yPosition))
       context.addLine(to: CGPoint(x: pageWidth - margin, y: yPosition))
       context.strokePath()
-      yPosition += 10
+      yPosition += 8
       
-      // Items
+      // Items with proper alignment and spacing
       for (index, item) in items.enumerated() {
         let itemName = item["productName"] as? String ?? ""
         let quantity = item["quantity"] as? Double ?? 0
@@ -327,27 +372,79 @@ import PDFKit
         let total = item["total"] as? Double ?? 0
         let unit = item["unit"] as? String ?? ""
         
-        "\(index + 1)".draw(at: CGPoint(x: margin, y: yPosition), withAttributes: [.font: smallFont, .foregroundColor: UIColor.black])
-        itemName.draw(at: CGPoint(x: margin + 15, y: yPosition), withAttributes: [.font: smallFont, .foregroundColor: UIColor.black])
-        "\(quantity)\(unit)".draw(at: CGPoint(x: margin + 105, y: yPosition), withAttributes: [.font: smallFont, .foregroundColor: UIColor.black])
-        String(format: "%.2f", price).draw(at: CGPoint(x: margin + 140, y: yPosition), withAttributes: [.font: smallFont, .foregroundColor: UIColor.black])
-        String(format: "%.2f", total).draw(at: CGPoint(x: margin + 180, y: yPosition), withAttributes: [.font: smallFont, .foregroundColor: UIColor.black])
-        yPosition += 12
+        // Truncate long item names to prevent overlap
+        let truncatedName = itemName.count > 15 ? String(itemName.prefix(15)) + "..." : itemName
+        
+        "\(index + 1)".draw(at: CGPoint(x: col1, y: yPosition), withAttributes: [.font: smallFont, .foregroundColor: UIColor.black])
+        truncatedName.draw(at: CGPoint(x: col2, y: yPosition), withAttributes: [.font: smallFont, .foregroundColor: UIColor.black])
+        
+        let qtyItemRect = CGRect(x: col3 - 15, y: yPosition, width: 30, height: 12)
+        "\(quantity)\(unit)".draw(in: qtyItemRect, withAttributes: [
+          .font: smallFont,
+          .foregroundColor: UIColor.black,
+          .paragraphStyle: {
+            let style = NSMutableParagraphStyle()
+            style.alignment = .center
+            return style
+          }()
+        ])
+        
+        let priceRect = CGRect(x: col4 - 20, y: yPosition, width: 40, height: 12)
+        String(format: "%.2f", price).draw(in: priceRect, withAttributes: [
+          .font: smallFont,
+          .foregroundColor: UIColor.black,
+          .paragraphStyle: {
+            let style = NSMutableParagraphStyle()
+            style.alignment = .right
+            return style
+          }()
+        ])
+        
+        let totalRect = CGRect(x: col5 - 25, y: yPosition, width: 35, height: 12)
+        String(format: "%.2f", total).draw(in: totalRect, withAttributes: [
+          .font: smallFont,
+          .foregroundColor: UIColor.black,
+          .paragraphStyle: {
+            let style = NSMutableParagraphStyle()
+            style.alignment = .right
+            return style
+          }()
+        ])
+        yPosition += 14
       }
       
-      // Draw line
+      // Draw separator line
       context.move(to: CGPoint(x: margin, y: yPosition))
       context.addLine(to: CGPoint(x: pageWidth - margin, y: yPosition))
       context.strokePath()
-      yPosition += 15
+      yPosition += 12
       
-      // Total
+      // Total with proper alignment
       let totalText = language == "ta" ? "மொத்தம்:" : "Total:"
-      totalText.draw(at: CGPoint(x: margin + 140, y: yPosition), withAttributes: [.font: headerFont, .foregroundColor: UIColor.black])
-      String(format: "%.2f", totalAmount).draw(at: CGPoint(x: margin + 180, y: yPosition), withAttributes: [.font: headerFont, .foregroundColor: UIColor.black])
+      let totalLabelRect = CGRect(x: col4 - 20, y: yPosition, width: 40, height: 15)
+      totalText.draw(in: totalLabelRect, withAttributes: [
+        .font: headerFont,
+        .foregroundColor: UIColor.black,
+        .paragraphStyle: {
+          let style = NSMutableParagraphStyle()
+          style.alignment = .right
+          return style
+        }()
+      ])
+      
+      let totalAmountRect = CGRect(x: col5 - 25, y: yPosition, width: 35, height: 15)
+      String(format: "%.2f", totalAmount).draw(in: totalAmountRect, withAttributes: [
+        .font: headerFont,
+        .foregroundColor: UIColor.black,
+        .paragraphStyle: {
+          let style = NSMutableParagraphStyle()
+          style.alignment = .right
+          return style
+        }()
+      ])
       yPosition += 25
       
-      // Footer
+      // Footer messages
       let thankYouText = language == "ta" ? "நன்றி" : "Thank You"
       let visitAgainText = language == "ta" ? "மீண்டும் வாருங்கள்" : "Visit Again"
       
@@ -375,16 +472,19 @@ import PDFKit
       ])
       yPosition += 20
       
+      // Tamil footer texts
       if language == "ta" {
-        // Draw line
+        // Draw separator line
         context.move(to: CGPoint(x: margin, y: yPosition))
         context.addLine(to: CGPoint(x: pageWidth - margin, y: yPosition))
         context.strokePath()
         yPosition += 15
         
-        let footer1Rect = CGRect(x: margin, y: yPosition, width: pageWidth - 2 * margin, height: 12)
+        let footerFont = UIFont.systemFont(ofSize: 9)
+        
+        let footer1Rect = CGRect(x: margin, y: yPosition, width: pageWidth - 2 * margin, height: 14)
         footerText1.draw(in: footer1Rect, withAttributes: [
-          .font: smallFont,
+          .font: footerFont,
           .foregroundColor: UIColor.black,
           .paragraphStyle: {
             let style = NSMutableParagraphStyle()
@@ -392,11 +492,11 @@ import PDFKit
             return style
           }()
         ])
-        yPosition += 12
+        yPosition += 14
         
-        let footer2Rect = CGRect(x: margin, y: yPosition, width: pageWidth - 2 * margin, height: 12)
+        let footer2Rect = CGRect(x: margin, y: yPosition, width: pageWidth - 2 * margin, height: 14)
         footerText2.draw(in: footer2Rect, withAttributes: [
-          .font: smallFont,
+          .font: footerFont,
           .foregroundColor: UIColor.black,
           .paragraphStyle: {
             let style = NSMutableParagraphStyle()
@@ -404,11 +504,11 @@ import PDFKit
             return style
           }()
         ])
-        yPosition += 12
+        yPosition += 14
         
-        let footer3Rect = CGRect(x: margin, y: yPosition, width: pageWidth - 2 * margin, height: 12)
+        let footer3Rect = CGRect(x: margin, y: yPosition, width: pageWidth - 2 * margin, height: 14)
         footerText3.draw(in: footer3Rect, withAttributes: [
-          .font: smallFont,
+          .font: footerFont,
           .foregroundColor: UIColor.black,
           .paragraphStyle: {
             let style = NSMutableParagraphStyle()

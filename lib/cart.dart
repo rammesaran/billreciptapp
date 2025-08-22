@@ -99,9 +99,20 @@ class _CartScreenState extends State<CartScreen> {
       widget.cartItems.fold(0, (sum, item) => sum + item.total);
 
   void _updateQuantity(int index, double quantity) {
+    if (quantity <= 0) {
+      _removeFromCart(index);
+      return;
+    }
+
+    // Update quantity without unnecessary setState calls
+    widget.cartItems[index].quantity = quantity;
     widget.onUpdateQuantity(index, quantity);
-    setState(() {});
     widget.onCartUpdated();
+
+    // Only update UI if widget is still mounted
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   void _removeFromCart(int index) {
@@ -860,7 +871,20 @@ class _CartScreenState extends State<CartScreen> {
   Future<void> _incrementReceiptNumber() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt('receiptNumber', widget.receiptNumber + 1);
+      final newReceiptNumber = widget.receiptNumber + 1;
+      await prefs.setInt('receiptNumber', newReceiptNumber);
+
+      // Also update in Firestore if online
+      if (widget.isOnline) {
+        try {
+          await _firestore.collection('settings').doc('shop').update({
+            'lastReceiptNumber': newReceiptNumber,
+            'lastUpdated': FieldValue.serverTimestamp(),
+          });
+        } catch (e) {
+          print('Error updating receipt number in Firestore: $e');
+        }
+      }
     } catch (e) {
       print('Error incrementing receipt number: $e');
     }
@@ -962,21 +986,27 @@ class _CartScreenState extends State<CartScreen> {
                                 ),
                                 child: Row(
                                   children: [
-                                    InkWell(
-                                      onTap: item.quantity == 1
-                                          ? null
-                                          : () => _updateQuantity(
-                                              index,
-                                              item.quantity - 1,
-                                            ),
-                                      child: Container(
-                                        padding: EdgeInsets.all(4),
-                                        child: Icon(
-                                          Icons.remove,
-                                          size: 20,
-                                          color: item.quantity == 1
-                                              ? Colors.grey
-                                              : Colors.orange,
+                                    Material(
+                                      color: Colors.transparent,
+                                      child: InkWell(
+                                        borderRadius: BorderRadius.circular(20),
+                                        onTap: item.quantity <= 1
+                                            ? null
+                                            : () {
+                                                _updateQuantity(
+                                                  index,
+                                                  item.quantity - 1,
+                                                );
+                                              },
+                                        child: Container(
+                                          padding: EdgeInsets.all(8),
+                                          child: Icon(
+                                            Icons.remove,
+                                            size: 18,
+                                            color: item.quantity <= 1
+                                                ? Colors.grey
+                                                : Colors.orange,
+                                          ),
                                         ),
                                       ),
                                     ),
@@ -985,24 +1015,30 @@ class _CartScreenState extends State<CartScreen> {
                                         horizontal: 12,
                                       ),
                                       child: Text(
-                                        '${item.quantity.toStringAsFixed(0)}',
+                                        '${item.quantity.toStringAsFixed(item.quantity == item.quantity.roundToDouble() ? 0 : 1)}',
                                         style: TextStyle(
                                           fontWeight: FontWeight.bold,
                                           fontSize: 16,
                                         ),
                                       ),
                                     ),
-                                    InkWell(
-                                      onTap: () => _updateQuantity(
-                                        index,
-                                        item.quantity + 1,
-                                      ),
-                                      child: Container(
-                                        padding: EdgeInsets.all(4),
-                                        child: Icon(
-                                          Icons.add,
-                                          size: 20,
-                                          color: Colors.green,
+                                    Material(
+                                      color: Colors.transparent,
+                                      child: InkWell(
+                                        borderRadius: BorderRadius.circular(20),
+                                        onTap: () {
+                                          _updateQuantity(
+                                            index,
+                                            item.quantity + 1,
+                                          );
+                                        },
+                                        child: Container(
+                                          padding: EdgeInsets.all(8),
+                                          child: Icon(
+                                            Icons.add,
+                                            size: 18,
+                                            color: Colors.green,
+                                          ),
                                         ),
                                       ),
                                     ),
@@ -1010,12 +1046,20 @@ class _CartScreenState extends State<CartScreen> {
                                 ),
                               ),
                               SizedBox(width: 8),
-                              IconButton(
-                                icon: Icon(
-                                  Icons.delete_outline,
-                                  color: Colors.red,
+                              Material(
+                                color: Colors.transparent,
+                                child: InkWell(
+                                  borderRadius: BorderRadius.circular(20),
+                                  onTap: () => _removeFromCart(index),
+                                  child: Container(
+                                    padding: EdgeInsets.all(8),
+                                    child: Icon(
+                                      Icons.delete_outline,
+                                      color: Colors.red,
+                                      size: 20,
+                                    ),
+                                  ),
                                 ),
-                                onPressed: () => _removeFromCart(index),
                               ),
                             ],
                           ),
